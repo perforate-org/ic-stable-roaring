@@ -57,6 +57,10 @@ pub enum InitError {
     IncompatibleVersion(u8),
     /// Catch-all for inconsistent header fields, snapshot length vs. memory size, corrupted
     /// snapshot bytes, or journal records that fail validation during replay.
+    ///
+    /// This includes a **journal slot count** in the header (offset `12`) that does not equal
+    /// [`crate::JOURNAL_CAP_SLOTS`]—for example opening stable memory written by a build compiled
+    /// with a different journal capacity.
     InvalidLayout,
     /// [`RoaringBitmap::init`] on empty memory calls [`RoaringBitmap::new`]; bootstrap failures there
     /// (usually [`BitmapError::GrowFailed`]) are returned as this variant.
@@ -391,7 +395,10 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// Returns [`InitError`] when magic/version/journal metadata disagree, lengths are inconsistent
     /// with the backing memory, the snapshot deserialize fails, or a journal record fails
-    /// validation.
+    /// validation. In particular, the header **`journal_slots` field must match
+    /// [`crate::JOURNAL_CAP_SLOTS`]**: otherwise [`InitError::InvalidLayout`] is returned—stable
+    /// memory laid out under a **different compile-time journal capacity cannot be reused** without an
+    /// application-level migration.
     ///
     /// # Time complexity
     ///

@@ -6,11 +6,11 @@ Stable-memory [roaring bitmap](https://docs.rs/roaring/latest/roaring/bitmap/str
 
 ## Documentation
 
-| Location                                                         | What to read there                                                                                                    |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| **This README**                                                  | What the crate does, how to get started, operational caveats.                                                         |
+| Location                                                         | What to read there                                                                                                                                                                           |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **This README**                                                  | What the crate does, how to get started, operational caveats.                                                                                                                                |
 | **Crate docs** (`cargo doc --open`, then `ic_stable_roaring`)    | On-disk **layout**, journal packing, **constants** (`JOURNAL_CAP_SLOTS` / `JOURNAL_READ_CHUNK_TARGET` / `JOURNAL_READ_CHUNK_MAX` in `build.rs`, `JOURNAL_LEN_MAX`, …), and crate-wide rules. |
-| **Type & method docs** (`StableRoaringBitmap` / `RoaringBitmap`) | Durability, **checkpointing**, **per-method time bounds**, **`init` as the normal constructor**, and errors (`BitmapError`, `InitError`). |
+| **Type & method docs** (`StableRoaringBitmap` / `RoaringBitmap`) | Durability, **checkpointing**, **per-method time bounds**, **`init` as the normal constructor**, and errors (`BitmapError`, `InitError`).                                                    |
 
 Complexity and edge cases (for example checkpoint cost **Θ(S)** when the journal fills, or **O(C)** work when truncating a suffix) live on those API docs—see **Time complexity** on each method.
 
@@ -24,7 +24,15 @@ Complexity and edge cases (for example checkpoint cost **Θ(S)** when the journa
 
 Mutations return **`Result<..., BitmapError>`** (`LimitsExceeded`, `GrowFailed`, snapshot **I/O**). Lengths above **`JOURNAL_LEN_MAX`** are reported as `LimitsExceeded`, not panics.
 
-The on-disk journal records **logical state changes**, not every redundant `set` call—do not treat it as a verbatim audit log. Journal capacity is fixed when the crate is built (**`JOURNAL_CAP_SLOTS`**, default `4096`). At compile time, set **`JOURNAL_CAP_SLOTS`** to any positive **`usize`**. **`JOURNAL_READ_CHUNK_BYTES`** is chosen in **`build.rs`** as the **largest divisor** of **`JOURNAL_CAP_SLOTS * 5`** that is a multiple of **`5`** and does not exceed **`floor5(min(JOURNAL_CAP_SLOTS * 5, JOURNAL_READ_CHUNK_TARGET, JOURNAL_READ_CHUNK_MAX))`** (defaults: target **`5120`**, max **`32768`**). The **target** defaults to the historical **`5120`** so an **empty or short journal** still pays only a **small first `Memory::read`**, while **`JOURNAL_READ_CHUNK_MAX`** remains a hard stack / buffer ceiling. Set **`JOURNAL_READ_CHUNK_TARGET`** high (up to the region size) if you intentionally want **fewer, larger** reads when the journal is dense. **`JOURNAL_REGION_BYTES`** is **`JOURNAL_CAP_SLOTS * 5`**. Smaller journals mean checkpoints happen more often under heavy writes.
+The on-disk journal records **logical state changes**, not every redundant `set` call—do not treat it as a verbatim audit log. Journal capacity is fixed when the crate is built (**`JOURNAL_CAP_SLOTS`**, default `8192`). At compile time, set **`JOURNAL_CAP_SLOTS`** to any positive **`usize`**. **`JOURNAL_READ_CHUNK_BYTES`** is chosen in **`build.rs`** as the **largest divisor** of **`JOURNAL_CAP_SLOTS * 5`** that is a multiple of **`5`** and does not exceed **`floor5(min(JOURNAL_CAP_SLOTS * 5, JOURNAL_READ_CHUNK_TARGET, JOURNAL_READ_CHUNK_MAX))`** (defaults: target **`5120`**, max **`32768`**). The **target** defaults to the historical **`5120`** so an **empty or short journal** still pays only a **small first `Memory::read`**, while **`JOURNAL_READ_CHUNK_MAX`** remains a hard stack / buffer ceiling. Set **`JOURNAL_READ_CHUNK_TARGET`** high (up to the region size) if you intentionally want **fewer, larger** reads when the journal is dense. **`JOURNAL_REGION_BYTES`** is **`JOURNAL_CAP_SLOTS * 5`**. Smaller journals mean checkpoints happen more often under heavy writes.
+
+### `JOURNAL_CAP_SLOTS` and stable-memory compatibility
+
+The header stores the configured slot count. **`StableRoaringBitmap::init`** requires it to equal this build’s **`JOURNAL_CAP_SLOTS`**. Otherwise opening fails with **`InitError::InvalidLayout`**.
+
+**Binary builds compiled with different `JOURNAL_CAP_SLOTS` values are not drop-in compatible on the same stable-memory image:** journal length, **`JOURNAL_READ_CHUNK_BYTES`**, **`snapshot_base`**, and all subsequent offsets diverge.
+
+To adopt a different capacity on a live canister, plan an explicit migration (for example replay logical operations into fresh storage laid out under the target build constant, export/import through your own serialization, or start from an empty bitmap on a cleared region)—this crate does not resize or relocate the layout in place.
 
 ## Usage notes
 

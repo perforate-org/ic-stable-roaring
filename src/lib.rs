@@ -61,6 +61,15 @@
 //! records (40 low bits; see module-level [`JOURNAL_RECORD_RAW_MASK`]); logical lengths are
 //! bounded by [`JOURNAL_LEN_MAX`]. Replay stops at the first all-zero record.
 //!
+//! ## `JOURNAL_CAP_SLOTS` and layout compatibility
+//!
+//! The header’s **journal slot count** (offset `12`) must equal the crate’s compile-time
+//! [`JOURNAL_CAP_SLOTS`]. Builds with **different** `JOURNAL_CAP_SLOTS` disagree on journal size,
+//! [`JOURNAL_READ_CHUNK_BYTES`], and `snapshot_base`, so **stable memory written under one cap is not
+//! loadable under another**: [`bitmap::RoaringBitmap::init`] returns [`InitError::InvalidLayout`] on
+//! mismatch. Migrating to a different capacity requires application-level relocation or replay; this
+//! crate does not rewrite the on-disk layout in place.
+//!
 //! # Durability (traps and stable memory)
 //!
 //! On the Internet Computer, **each message execution** runs to completion or **traps**; there is no
