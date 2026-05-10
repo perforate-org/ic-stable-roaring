@@ -2,7 +2,7 @@
 
 Stable-memory [Roaring Bitmap](https://docs.rs/roaring/latest/roaring/bitmap/struct.RoaringBitmap.html) for [Internet Computer](https://internetcomputer.org/) canisters. Reads use a heap mirror; `set`, `insert`, `clear`, `ensure_len`, and `truncate` persist through an append-only journal and occasional snapshots into stable memory.
 
-**Durability:** On the IC, a canister call runs to completion or traps; after a mutating method returns `Ok`, its stable writes for that call have finished. This crate does not add a separate crash-recovery protocol beyond validating bytes on `init` (`InvalidLayout` if the snapshot is inconsistent). See **`cargo doc`** on the `ic-stable-roaring` crate for the full **Durability** section.
+**Durability:** On IC, a canister call runs to completion or traps; after a mutating method returns `Ok`, its stable writes for that call have finished. This crate does not add a separate crash-recovery protocol beyond validating bytes on `init` (`InvalidLayout` if the snapshot is inconsistent). See **`cargo doc`** on the `ic-stable-roaring` crate for the full **Durability** section.
 
 ## Documentation
 
