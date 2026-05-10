@@ -19,6 +19,8 @@ include = [
     "src/**/*",
 ]
 
+repository = "https://app.radicle.xyz/nodes/iris.radicle.xyz/rad:zDtjNsMiepkyY2QGnW4NUbjrBExY"
+
 readme = "README.md"
 
 categories = ["data-structures"]
