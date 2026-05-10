@@ -70,6 +70,11 @@
 //! mismatch. Migrating to a different capacity requires application-level relocation or replay; this
 //! crate does not rewrite the on-disk layout in place.
 //!
+//! **Tuning:** larger [`JOURNAL_CAP_SLOTS`] reduces how often checkpoints run under heavy mutation;
+//! smaller caps shrink the stable journal footprint and can lower reopen/replay cost when journals
+//! are long. There is workload-dependent trade-off (mutation vs [`RoaringBitmap::init`] frequency);
+//! see the README section **Choosing `JOURNAL_CAP_SLOTS` (default and tuning)** and `build.rs` env vars.
+//!
 //! # Durability (traps and stable memory)
 //!
 //! On the Internet Computer, **each message execution** runs to completion or **traps**; there is no

@@ -34,6 +34,17 @@ The header stores the configured slot count. **`StableRoaringBitmap::init`** req
 
 To adopt a different capacity on a live canister, plan an explicit migration (for example replay logical operations into fresh storage laid out under the target build constant, export/import through your own serialization, or start from an empty bitmap on a cleared region)—this crate does not resize or relocate the layout in place.
 
+### Choosing `JOURNAL_CAP_SLOTS` (default and tuning)
+
+There is **no single optimal** slot count for every canister: behavior depends on how often you **mutate** the bitmap versus how often you **cold-open** it (for example after `init` on upgrade or reload) and on how full the journal tends to be before a checkpoint.
+
+Rough guide:
+
+- **Larger capacity** (for example **8192**) — Under steady **writes**, the journal fills less often, so **full-journal checkpoints occur less frequently** (each checkpoint is costly in snapshot size **S**). You pay a **larger fixed journal region** in stable memory (**`JOURNAL_REGION_BYTES`**) and, in paths that replay a **long** journal, **reopen / replay work can grow** with how much is recorded.
+- **Smaller capacity** (for example **4096**) — **Smaller** stable layout and somewhat **lower worst-case reopen cost** when large journal backlogs matter, at the price of **more frequent** checkpoints when mutations keep the journal busy.
+
+The **crate default** (**8192**) favors a common pattern—**mutations dominate, upgrades or full restarts are comparatively rare**—and reflects a judgment that **checkpoint thrashing** is often more painful than the extra journal bytes at this scale. That is **not** a universal fact: if you care more about **minimal stable footprint** or expect **`init`/replay** on a saturated journal often, benchmark or pick a **smaller** `JOURNAL_CAP_SLOTS` via the build-time env vars in **`build.rs`**. Migrating after launch always requires **layout-compatible** migration (see above).
+
 ## Usage notes
 
 - Intended for **single-writer** use; do not alias the same stable memory through another API while an instance is live.

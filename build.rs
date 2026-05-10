@@ -5,6 +5,8 @@
 //!
 //! Optional env vars (compile time):
 //! - **`JOURNAL_CAP_SLOTS`** — journal slot capacity (default **`8192`**; any **`usize >= 1`**).
+//!   The default assumes **mutation-heavy** canisters versus cold `init`; smaller values trade more
+//!   frequent checkpoints for a smaller stable journal — see README **Choosing `JOURNAL_CAP_SLOTS`**.
 //!   This value is stored in the stable-memory header; journal size and the rest of the layout derive
 //!   from it, so **Wasm modules compiled with different caps are not interchangeable** on the same
 //!   backing memory unless you migrate externally (see the `ic_stable_roaring` crate README and crate
