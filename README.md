@@ -2,13 +2,15 @@
 
 Stable-memory [roaring bitmap](https://docs.rs/roaring/latest/roaring/bitmap/struct.RoaringBitmap.html) for [Internet Computer](https://internetcomputer.org/) canisters. Reads use a heap mirror; `set`, `insert`, `clear`, `ensure_len`, and `truncate` persist through an append-only journal and occasional snapshots into stable memory.
 
+**Durability:** On the IC, a canister call runs to completion or traps; after a mutating method returns `Ok`, its stable writes for that call have finished. This crate does not add a separate crash-recovery protocol beyond validating bytes on `init` (`InvalidLayout` if the snapshot is inconsistent). See **`cargo doc`** on the `ic_stable_roaring` crate for the full **Durability** section.
+
 ## Documentation
 
 | Location                                                         | What to read there                                                                                                    |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | **This README**                                                  | What the crate does, how to get started, operational caveats.                                                         |
 | **Crate docs** (`cargo doc --open`, then `ic_stable_roaring`)    | On-disk **layout**, journal packing, **constants** (`JOURNAL_CAP_SLOTS`, `JOURNAL_LEN_MAX`, …), and crate-wide rules. |
-| **Type & method docs** (`StableRoaringBitmap` / `RoaringBitmap`) | Durability, **checkpointing**, **per-method time bounds**, **`init` as the normal constructor**, and error types.     |
+| **Type & method docs** (`StableRoaringBitmap` / `RoaringBitmap`) | Durability, **checkpointing**, **per-method time bounds**, **`init` as the normal constructor**, and errors (`BitmapError`, `InitError`). |
 
 Complexity and edge cases (for example checkpoint cost **Θ(S)** when the journal fills, or **O(C)** work when truncating a suffix) live on those API docs—see **Time complexity** on each method.
 
@@ -20,10 +22,15 @@ Complexity and edge cases (for example checkpoint cost **Θ(S)** when the journa
 - **`truncate`** — shortens the logical length and clears set bits from the new end onward (same cap).
 - **`len` / `is_empty`** — **logical** length, not set-bit cardinality.
 
+Mutations return **`Result<..., BitmapError>`** (`LimitsExceeded`, `GrowFailed`, snapshot **I/O**). Lengths above **`JOURNAL_LEN_MAX`** are reported as `LimitsExceeded`, not panics.
+
+The on-disk journal records **logical state changes**, not every redundant `set` call—do not treat it as a verbatim audit log. Journal capacity is fixed at compile time (**`JOURNAL_CAP_SLOTS`**); heavy update streams trigger checkpoints more often.
+
 ## Usage notes
 
 - Intended for **single-writer** use; do not alias the same stable memory through another API while an instance is live.
-- Call **`StableRoaringBitmap::init`** whenever you need an instance (first boot with empty stable memory, after upgrade, or any reload). Empty memory is handled inside `init`; you should not need **`new`** in application code (it exists for tests and `GrowFailed`-typed bootstrap).
+- Call **`StableRoaringBitmap::init`** whenever you need an instance (first boot with empty stable memory, after upgrade, or any reload). Empty memory is handled inside `init`; **`new`** is mainly for tests and code that wants **`BitmapError`** without mapping through **`InitError`**.
+- Holding **`contains_view`** borrows the heap mirror; drop it before other operations on the same bitmap if you would mix reads and writes in one scope (see crate **Concurrency** docs).
 - Logical length upper bound: **`JOURNAL_LEN_MAX`** = `u32::MAX + 1` (see crate docs).
 
 ## Example

@@ -58,8 +58,8 @@ pub enum InitError {
     /// Catch-all for inconsistent header fields, snapshot length vs. memory size, corrupted
     /// snapshot bytes, or journal records that fail validation during replay.
     InvalidLayout,
-    /// Empty memory forwards to [`RoaringBitmap::new`]; failing to allocate or initialize pages
-    /// becomes this error instead of [`crate::GrowFailed`].
+    /// [`RoaringBitmap::init`] on empty memory calls [`RoaringBitmap::new`]; bootstrap failures there
+    /// (usually [`BitmapError::GrowFailed`]) are returned as this variant.
     OutOfMemory,
 }
 
@@ -80,6 +80,51 @@ impl fmt::Display for InitError {
 }
 
 impl std::error::Error for InitError {}
+
+/// Error returned by [`RoaringBitmap::new`] and mutating methods (`set`, `ensure_len`, checkpoint I/O, …).
+#[derive(Debug, PartialEq, Eq)]
+pub enum BitmapError {
+    /// `len` or `index + 1` is greater than [`crate::JOURNAL_LEN_MAX`].
+    LimitsExceeded { value: u64, max: u64 },
+    /// Stable memory could not be grown for a write or checkpoint.
+    GrowFailed(crate::GrowFailed),
+    /// Snapshot serialization or stable write failed (`roaring` / [`std::io::Write`] path).
+    Io(String),
+}
+
+impl fmt::Display for BitmapError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LimitsExceeded { value, max } => write!(
+                f,
+                "value {value} exceeds supported limit {max} (JOURNAL_LEN_MAX; u32 index space)"
+            ),
+            Self::GrowFailed(e) => write!(f, "{e}"),
+            Self::Io(msg) => write!(f, "snapshot I/O: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for BitmapError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::GrowFailed(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<crate::GrowFailed> for BitmapError {
+    fn from(value: crate::GrowFailed) -> Self {
+        Self::GrowFailed(value)
+    }
+}
+
+impl From<std::io::Error> for BitmapError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value.to_string())
+    }
+}
 
 /// Start offset of the journal region in stable memory.
 fn journal_offset() -> u64 {
@@ -157,9 +202,9 @@ struct JournalRecord([u8; 5]);
 
 impl JournalRecord {
     fn set_len(len: u64) -> Self {
-        assert!(
+        debug_assert!(
             len <= crate::JOURNAL_LEN_MAX,
-            "bitmap length exceeds supported u32 index space"
+            "JournalRecord::set_len: len must be validated at API boundary"
         );
         let payload_lo = len as u32;
         let len_hi = ((len >> 32) & 1) as u32;
@@ -309,12 +354,16 @@ impl<M: Memory> RoaringBitmap<M> {
     /// **Canister code should call [`Self::init`] instead**—that is the single supported entry
     /// point for opening stable memory (including the first time, when `memory.size() == 0`, which
     /// forwards here). [`Self::new`] remains public for tests and advanced callers that need
-    /// [`crate::GrowFailed`] instead of [`InitError`].
+    /// [`InitError`]-free bootstrap errors ([`BitmapError`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BitmapError`] when header setup or padding writes fail.
     ///
     /// # Time complexity
     ///
     /// **O(1)** with respect to bitmap contents (fixed header and journal layout).
-    pub fn new(memory: M) -> Result<Self, crate::GrowFailed> {
+    pub fn new(memory: M) -> Result<Self, BitmapError> {
         write_header(&memory, 0, 0)?;
         let snap = snapshot_base();
         grow_memory_to_at_least_bytes(&memory, snap)?;
@@ -335,8 +384,8 @@ impl<M: Memory> RoaringBitmap<M> {
     /// Validates the header, deserializes the roaring snapshot, reads the fixed-size journal
     /// region, and reapplies records until the first all-zero slot (see [`crate`]).
     ///
-    /// When `memory.size() == 0`, this forwards to [`Self::new`] and maps [`crate::GrowFailed`] to
-    /// [`InitError::OutOfMemory`].
+    /// When `memory.size() == 0`, this forwards to [`Self::new`] and maps any [`BitmapError`] to
+    /// [`InitError::OutOfMemory`] (storage bootstrap failure).
     ///
     /// # Errors
     ///
@@ -476,9 +525,10 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// No-op when `min_len <= len()`.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics when `min_len` exceeds [`crate::JOURNAL_LEN_MAX`].
+    /// Returns [`BitmapError::LimitsExceeded`] when `min_len` is greater than [`crate::JOURNAL_LEN_MAX`],
+    /// or other [`BitmapError`] variants when journaling or checkpointing fails.
     ///
     /// # Time complexity
     ///
@@ -488,11 +538,13 @@ impl<M: Memory> RoaringBitmap<M> {
     /// **O(1)** amortized for steady mutations between checkpoints, with rare **Θ(S)** checkpoints
     /// for serialized snapshot size **S**. Only growing the length does **not** enumerate unset
     /// bits in the roaring structure.
-    pub fn ensure_len(&self, min_len: u64) -> Result<(), crate::GrowFailed> {
-        assert!(
-            min_len <= crate::JOURNAL_LEN_MAX,
-            "bitmap length exceeds supported u32 index space"
-        );
+    pub fn ensure_len(&self, min_len: u64) -> Result<(), BitmapError> {
+        if min_len > crate::JOURNAL_LEN_MAX {
+            return Err(BitmapError::LimitsExceeded {
+                value: min_len,
+                max: crate::JOURNAL_LEN_MAX,
+            });
+        }
         let current = self.len();
         if min_len <= current {
             return Ok(());
@@ -514,9 +566,11 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// Setting `true` can extend [`Self::len`] to `index + 1` without a separate `SetLen` record.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics when `index as u64 + 1` would exceed [`crate::JOURNAL_LEN_MAX`].
+    /// Returns [`BitmapError::LimitsExceeded`] if `index + 1` as `u64` would exceed [`crate::JOURNAL_LEN_MAX`]
+    /// (this is unreachable for any `u32` index, but kept for API symmetry), or other [`BitmapError`]
+    /// variants when journaling or checkpointing fails.
     ///
     /// # Time complexity
     ///
@@ -524,12 +578,14 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// When the stored bit changes, expect **O(1)** amortized roaring updates and journal I/O, plus
     /// **Θ(S)** when a checkpoint runs (**S** = serialized snapshot size).
-    pub fn set(&self, index: u32, value: bool) -> Result<(), crate::GrowFailed> {
+    pub fn set(&self, index: u32, value: bool) -> Result<(), BitmapError> {
         let need_len = u64::from(index).saturating_add(1);
-        assert!(
-            need_len <= crate::JOURNAL_LEN_MAX,
-            "bit index exceeds supported u32 index space"
-        );
+        if need_len > crate::JOURNAL_LEN_MAX {
+            return Err(BitmapError::LimitsExceeded {
+                value: need_len,
+                max: crate::JOURNAL_LEN_MAX,
+            });
+        }
         if value {
             if !self.contains(index) {
                 self.append_record(JournalRecord::set_bit(index, true))?;
@@ -558,12 +614,12 @@ impl<M: Memory> RoaringBitmap<M> {
     }
 
     /// Equivalent to `self.set(index, true)`. See [`Self::set`] for journaling rules and complexity.
-    pub fn insert(&self, index: u32) -> Result<(), crate::GrowFailed> {
+    pub fn insert(&self, index: u32) -> Result<(), BitmapError> {
         self.set(index, true)
     }
 
     /// Equivalent to `self.set(index, false)`. See [`Self::set`] for journaling rules and complexity.
-    pub fn clear(&self, index: u32) -> Result<(), crate::GrowFailed> {
+    pub fn clear(&self, index: u32) -> Result<(), BitmapError> {
         self.set(index, false)
     }
 
@@ -571,9 +627,10 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// No-op when `new_len >= len()`.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics when `new_len` exceeds [`crate::JOURNAL_LEN_MAX`].
+    /// Returns [`BitmapError::LimitsExceeded`] when `new_len` is greater than [`crate::JOURNAL_LEN_MAX`],
+    /// or other [`BitmapError`] variants when journaling or checkpointing fails.
     ///
     /// # Time complexity
     ///
@@ -582,11 +639,13 @@ impl<M: Memory> RoaringBitmap<M> {
     /// Otherwise **O(C)** to clear the suffix where **C** is the number of roaring containers
     /// overlapping the removed range, plus journal append and **Θ(S)** checkpoints (**S** =
     /// serialized snapshot size) when the journal is full.
-    pub fn truncate(&self, new_len: u64) -> Result<(), crate::GrowFailed> {
-        assert!(
-            new_len <= crate::JOURNAL_LEN_MAX,
-            "bitmap length exceeds supported u32 index space"
-        );
+    pub fn truncate(&self, new_len: u64) -> Result<(), BitmapError> {
+        if new_len > crate::JOURNAL_LEN_MAX {
+            return Err(BitmapError::LimitsExceeded {
+                value: new_len,
+                max: crate::JOURNAL_LEN_MAX,
+            });
+        }
         if new_len >= self.len() {
             return Ok(());
         }
@@ -601,7 +660,7 @@ impl<M: Memory> RoaringBitmap<M> {
     }
 
     /// Appends a packed mutation record to the journal.
-    fn append_record(&self, record: JournalRecord) -> Result<(), crate::GrowFailed> {
+    fn append_record(&self, record: JournalRecord) -> Result<(), BitmapError> {
         if self.journal_len.get() >= crate::JOURNAL_CAP_SLOTS as u64 {
             self.checkpoint()?;
         }
@@ -613,7 +672,7 @@ impl<M: Memory> RoaringBitmap<M> {
     }
 
     /// Checkpoints the heap mirror when the journal reaches capacity.
-    fn maybe_checkpoint(&self) -> Result<(), crate::GrowFailed> {
+    fn maybe_checkpoint(&self) -> Result<(), BitmapError> {
         if self.journal_len.get() >= crate::JOURNAL_CAP_SLOTS as u64 {
             self.checkpoint()?;
         }
@@ -621,22 +680,20 @@ impl<M: Memory> RoaringBitmap<M> {
     }
 
     /// Writes the heap mirror back into stable memory and clears the journal.
-    fn checkpoint(&self) -> Result<(), crate::GrowFailed> {
+    fn checkpoint(&self) -> Result<(), BitmapError> {
         let (len_bits, snapshot_len_bytes) = {
             let st = self.state.borrow();
             (st.len_bits, st.bitmap.serialized_size() as u64)
         };
         let need_bytes = snapshot_base()
             .checked_add(snapshot_len_bytes)
-            .expect("address overflow");
+            .ok_or_else(|| BitmapError::Io("address overflow computing snapshot end".into()))?;
         grow_memory_to_at_least_bytes(&self.memory, need_bytes)?;
 
         {
             let st = self.state.borrow();
             let mut writer = MemoryWriter::new(&self.memory, snapshot_base());
-            st.bitmap
-                .serialize_into(&mut writer)
-                .expect("serialize roaring snapshot");
+            st.bitmap.serialize_into(&mut writer)?;
         }
 
         write_header(&self.memory, len_bits, snapshot_len_bytes)?;
@@ -695,6 +752,26 @@ mod tests {
 
     fn reopen(memory: VectorMemory) -> RoaringBitmap<VectorMemory> {
         RoaringBitmap::init(memory).unwrap()
+    }
+
+    #[test]
+    fn limits_exceeded_returns_error() {
+        let mem = VectorMemory::default();
+        let bs = RoaringBitmap::new(mem).unwrap();
+        assert_eq!(
+            bs.ensure_len(crate::JOURNAL_LEN_MAX + 1),
+            Err(BitmapError::LimitsExceeded {
+                value: crate::JOURNAL_LEN_MAX + 1,
+                max: crate::JOURNAL_LEN_MAX,
+            })
+        );
+        assert_eq!(
+            bs.truncate(crate::JOURNAL_LEN_MAX + 1),
+            Err(BitmapError::LimitsExceeded {
+                value: crate::JOURNAL_LEN_MAX + 1,
+                max: crate::JOURNAL_LEN_MAX,
+            })
+        );
     }
 
     #[test]

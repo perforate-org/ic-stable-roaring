@@ -14,7 +14,7 @@
 //!   idempotent `set`, **use [`RoaringBitmap::init`] in canister code** (see that method), and
 //!   **per-method time/space notes** (including amortized costs when the journal fills).
 //! - **[`ContainsView`]**: borrowing the heap mirror for repeated `contains` checks.
-//! - **[`InitError`] / [`GrowFailed`]**: error meanings returned by constructors and mutating calls.
+//! - **[`InitError`] / [`BitmapError`] / [`GrowFailed`]**: error meanings for `init`, mutations / [`RoaringBitmap::new`], and page growth details.
 //!
 //! # Design
 //!
@@ -61,6 +61,19 @@
 //! records (40 low bits; see module-level [`JOURNAL_RECORD_RAW_MASK`]); logical lengths are
 //! bounded by [`JOURNAL_LEN_MAX`]. Replay stops at the first all-zero record.
 //!
+//! # Durability (traps and stable memory)
+//!
+//! On the Internet Computer, **each message execution** runs to completion or **traps**; there is no
+//! preemptive mid-instruction interrupt of your Wasm akin to arbitrary host crash. Stable memory
+//! updates become visible **as your code performs `Memory::write` / `grow`**. After a method
+//! returns `Ok`, callers may assume durable mutations and checkpoints **completed** for that call.
+//!
+//! The library does **not** try to model torn writes inside a single store: checkpoint order is
+//! **write the roaring snapshot bytes, then update the header** (see [`RoaringBitmap`]).
+//! [`RoaringBitmap::init`] treats a broken snapshot (deserialize failure, length mismatch) as
+//! [`InitError::InvalidLayout`]. If you need stronger cross-trap guarantees between those steps,
+//! consider an application-level epoch or backup region (out of scope for this crate today).
+//!
 //! # Type parameters
 //!
 //! - `M`: an [`ic_stable_structures::Memory`] implementation. The bitmap reads and writes the
@@ -71,6 +84,11 @@
 //! `RoaringBitmap` uses interior mutability for the heap mirror and is intended for single-writer use.
 //! The stable memory region should not be mutated through another wrapper while a bitmap instance
 //! is in use.
+//!
+//! [`RoaringBitmap::contains_view`] holds a [`std::cell::RefCell`] read guard until dropped; calling
+//! mutating methods on the same bitmap while that guard is alive will trigger `RefCell`’s runtime
+//! conflict rules (typically `panic!` on the single-threaded IC). Prefer finishing the scan and
+//! dropping the view before writes.
 //!
 //! # Example
 //!
@@ -112,5 +130,5 @@ pub const JOURNAL_RECORD_RAW_MASK: u64 = (1u64 << 40) - 1;
 pub const JOURNAL_LEN_MAX: u64 = (u32::MAX as u64) + 1;
 
 pub use bitmap::RoaringBitmap as StableRoaringBitmap;
-pub use bitmap::{ContainsView, InitError, RoaringBitmap};
+pub use bitmap::{BitmapError, ContainsView, InitError, RoaringBitmap};
 pub use memory::GrowFailed;
