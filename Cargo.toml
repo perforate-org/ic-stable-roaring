@@ -1,9 +1,14 @@
 [package]
 name = "ic-stable-roaring"
 version = "0.1.0"
+authors = ["Inomoto Yota <yota@perforate.org>"]
 edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.90.0"
+
 build = "build.rs"
 
+description = "Persistent Rust Roaring Bitmap for the Internet Computer."
 include = [
     "Cargo.toml",
     "README.md",
@@ -13,6 +18,11 @@ include = [
     "generated/**/*",
     "src/**/*",
 ]
+
+readme = "README.md"
+
+categories = ["data-structures"]
+keywords = ["internet-computer", "roaring", "bitmap"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
