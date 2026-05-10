@@ -4,6 +4,16 @@ version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
+include = [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "build.rs",
+    "generated/**/*",
+    "src/**/*",
+]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
