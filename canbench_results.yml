@@ -1,0 +1,134 @@
+benches:
+  bench_roaring_checkpoint_after_full_journal_4096:
+    total:
+      calls: 1
+      instructions: 113974
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_checkpoint:
+        calls: 1
+        instructions: 112926
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_contains_1024:
+    total:
+      calls: 1
+      instructions: 1767
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_contains:
+        calls: 1
+        instructions: 730
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_contains_65536_32768:
+    total:
+      calls: 1
+      instructions: 3278219
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_contains_large_32768:
+        calls: 1
+        instructions: 3277182
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_contains_65536_4096:
+    total:
+      calls: 1
+      instructions: 411019
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_contains_large:
+        calls: 1
+        instructions: 409982
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_insert_1024:
+    total:
+      calls: 1
+      instructions: 631308
+      heap_increase: 0
+      stable_memory_increase: 1
+    scopes:
+      roaring_insert:
+        calls: 1
+        instructions: 628309
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_reopen_after_journal_4096:
+    total:
+      calls: 1
+      instructions: 282716
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_reopen:
+        calls: 1
+        instructions: 281694
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_reopen_after_large_snapshot_65536:
+    total:
+      calls: 1
+      instructions: 41098
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_reopen_large:
+        calls: 1
+        instructions: 40076
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_reopen_after_pure_journal_4096:
+    total:
+      calls: 1
+      instructions: 12599
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_reopen_pure_journal:
+        calls: 1
+        instructions: 11563
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_reopen_after_segmented_journal_4096:
+    total:
+      calls: 1
+      instructions: 2671566
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_reopen_segmented_journal:
+        calls: 1
+        instructions: 2670530
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_truncate_2048_to_1024:
+    total:
+      calls: 1
+      instructions: 2487
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_truncate:
+        calls: 1
+        instructions: 1482
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_truncate_large_suffix_65536_to_32768:
+    total:
+      calls: 1
+      instructions: 13058
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_truncate_large:
+        calls: 1
+        instructions: 12053
+        heap_increase: 0
+        stable_memory_increase: 0
+version: 0.4.0
