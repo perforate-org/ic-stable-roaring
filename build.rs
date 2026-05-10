@@ -130,6 +130,16 @@ fn main() {
     );
     write_if_changed(&out_path, &contents);
 
+    // Gate `#[cfg]` in `bench` so fixed-journal benchmarks are omitted when compile-time caps are too small.
+    println!("cargo:rustc-check-cfg=cfg(journal_slots_ge_1024)");
+    println!("cargo:rustc-check-cfg=cfg(journal_slots_ge_4096)");
+    if slots >= 1024 {
+        println!("cargo:rustc-cfg=journal_slots_ge_1024");
+    }
+    if slots >= 4096 {
+        println!("cargo:rustc-cfg=journal_slots_ge_4096");
+    }
+
     println!("cargo:rerun-if-env-changed=JOURNAL_CAP_SLOTS");
     println!("cargo:rerun-if-env-changed=JOURNAL_READ_CHUNK_MAX");
     println!("cargo:rerun-if-env-changed=JOURNAL_READ_CHUNK_TARGET");

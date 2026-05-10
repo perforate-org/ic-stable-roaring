@@ -1,4 +1,9 @@
 //! PocketIC / `canbench` harness for [`ic_stable_roaring::StableRoaringBitmap`].
+//!
+//! Cross-capacity comparisons: benchmarks whose names contain **`fixed`** hold total writes or pending
+//! journal length **constant** regardless of [`crate::JOURNAL_CAP_SLOTS`].
+//! Fixed-pending **`reopen`** benches are **`cfg`‑gated in `build.rs`** (`journal_slots_ge_1024`,
+//! `journal_slots_ge_4096`) when the crate is built without enough journal capacity.
 
 use std::hint::black_box;
 
@@ -32,6 +37,15 @@ const JOURNAL_PREFIX_SMALL: u64 = 64;
 
 /// How many roughly “full-journal equivalents” of sequential inserts to apply in sustained bench.
 const JOURNAL_SUSTAINED_CYCLES: u64 = 8;
+
+/// Sequential `insert` count **independent of journal capacity** (checkpoint cadence varies with cap).
+const FIXED_TOTAL_SEQUENTIAL_INSERTS: u64 = 32_768;
+
+#[cfg(journal_slots_ge_1024)]
+const FIXED_JOURNAL_PENDING_1024: u64 = 1_024;
+
+#[cfg(journal_slots_ge_4096)]
+const FIXED_JOURNAL_PENDING_4096: u64 = 4_096;
 
 fn make_bitset() -> StableRoaringBitmap<DefaultMemoryImpl> {
     StableRoaringBitmap::init(DefaultMemoryImpl::default()).expect("bitmap init")
@@ -294,5 +308,55 @@ fn bench_roaring_sequential_inserts_sustained_journal() -> canbench_rs::BenchRes
         }
         let last = (total_indices.saturating_sub(1)) as u32;
         black_box((bitset.len(), bitset.contains(black_box(last))));
+    })
+}
+
+/// Stream **`32768`** sequential `insert`s — workload **does not scale** with [`crate::JOURNAL_CAP_SLOTS`];
+/// checkpoint counts and snapshot sizes still depend on capacity.
+#[bench(raw)]
+fn bench_roaring_sequential_inserts_fixed_32768() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    canbench_rs::bench_fn(|| {
+        wipe::wipe_stable_memory();
+        let bitset = make_bitset();
+        let n = black_box(FIXED_TOTAL_SEQUENTIAL_INSERTS);
+        let _p = canbench_rs::bench_scope("roaring_seq_inserts_fixed_32768");
+        for i in 0..n {
+            bitset.insert(i as u32).expect("fixed sequential insert");
+        }
+        let last = (n.saturating_sub(1)) as u32;
+        black_box((bitset.len(), bitset.contains(black_box(last))));
+    })
+}
+
+/// Reopen with **exactly 1024** pending `insert` journal records (`0..1024`).
+///
+/// Compiled only when **`JOURNAL_CAP_SLOTS ≥ 1024`** (`build.rs` emits `journal_slots_ge_1024`).
+#[cfg(journal_slots_ge_1024)]
+#[bench(raw)]
+fn bench_roaring_reopen_journal_fixed_pending_1024() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, FIXED_JOURNAL_PENDING_1024);
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_reopen_journal_fixed_1024");
+        let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
+        black_box(reopened.contains(black_box(1023u32)));
+    })
+}
+
+/// Reopen with **4096** pending inserts (indices `0..4095`).
+///
+/// Compiled only when **`JOURNAL_CAP_SLOTS ≥ 4096`** (`build.rs` emits `journal_slots_ge_4096`).
+#[cfg(journal_slots_ge_4096)]
+#[bench(raw)]
+fn bench_roaring_reopen_journal_fixed_pending_4096() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, FIXED_JOURNAL_PENDING_4096);
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_reopen_journal_fixed_4096");
+        let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
+        black_box(reopened.contains(black_box(4095u32)));
     })
 }

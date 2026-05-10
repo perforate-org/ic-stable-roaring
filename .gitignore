@@ -5,5 +5,8 @@ Cargo.lock
 # canbench
 .canbench/
 
+# Local sweep artifacts (scripts/sweep_journal_cap_canbench.sh)
+tmp/
+
 # OS
 .DS_Store
