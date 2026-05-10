@@ -11,7 +11,7 @@ mod wipe;
 const INSERT_COUNT: u64 = 1_024;
 const TRUNCATE_FROM: u64 = 2_048;
 const TRUNCATE_TO: u64 = 1_024;
-const REOPEN_COUNT: u64 = 4_096;
+const REOPEN_COUNT: u64 = crate::JOURNAL_CAP_SLOTS as u64;
 const LARGE_SNAPSHOT_BITS: u64 = 65_536;
 const CONTAINS_BITMAP_BITS: u64 = 65_536;
 const CONTAINS_QUERY_COUNT: u64 = 4_096;
@@ -20,9 +20,18 @@ const CONTAINS_SPREAD_MULTIPLIER: u64 = 0x9E37;
 const CONTAINS_SPREAD_INCREMENT: u64 = 0xB529;
 const LARGE_TRUNCATE_FROM: u64 = 65_536;
 const LARGE_TRUNCATE_TO: u64 = 32_768;
-const JOURNAL_CAP_FILL: u64 = 4_096;
+const JOURNAL_CAP_FILL: u64 = crate::JOURNAL_CAP_SLOTS as u64;
 const REPLAY_BLOCK: u64 = JOURNAL_CAP_FILL / 4;
 const REPLAY_HALF: u64 = JOURNAL_CAP_FILL / 2;
+
+/// Replay prefix length (~75% of journal capacity) — `JOURNAL_CAP_SLOTS` is a multiple of 4 via `build.rs`.
+const REPLAY_THREE_QUARTERS: u64 = crate::JOURNAL_CAP_SLOTS as u64 * 3 / 4;
+
+/// Small fixed prefix unrelated to journal cap — baseline reopen cost dominated by decode/scan start.
+const JOURNAL_PREFIX_SMALL: u64 = 64;
+
+/// How many roughly “full-journal equivalents” of sequential inserts to apply in sustained bench.
+const JOURNAL_SUSTAINED_CYCLES: u64 = 8;
 
 fn make_bitset() -> StableRoaringBitmap<DefaultMemoryImpl> {
     StableRoaringBitmap::init(DefaultMemoryImpl::default()).expect("bitmap init")
@@ -156,7 +165,7 @@ fn bench_roaring_truncate_2048_to_1024() -> canbench_rs::BenchResult {
 }
 
 #[bench(raw)]
-fn bench_roaring_reopen_after_journal_4096() -> canbench_rs::BenchResult {
+fn bench_roaring_reopen_after_full_journal() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();
     let bitset = make_bitset();
     populate(&bitset, REOPEN_COUNT);
@@ -169,12 +178,12 @@ fn bench_roaring_reopen_after_journal_4096() -> canbench_rs::BenchResult {
 }
 
 #[bench(raw)]
-fn bench_roaring_reopen_after_pure_journal_4096() -> canbench_rs::BenchResult {
+fn bench_roaring_reopen_after_pure_journal_full() -> canbench_rs::BenchResult {
     bench_reopen_case("roaring_reopen_pure_journal", setup_pure_replay_journal)
 }
 
 #[bench(raw)]
-fn bench_roaring_reopen_after_segmented_journal_4096() -> canbench_rs::BenchResult {
+fn bench_roaring_reopen_after_segmented_journal_full() -> canbench_rs::BenchResult {
     bench_reopen_case(
         "roaring_reopen_segmented_journal",
         setup_segmented_replay_journal,
@@ -196,7 +205,7 @@ fn bench_roaring_truncate_large_suffix_65536_to_32768() -> canbench_rs::BenchRes
 }
 
 #[bench(raw)]
-fn bench_roaring_checkpoint_after_full_journal_4096() -> canbench_rs::BenchResult {
+fn bench_roaring_checkpoint_after_full_journal() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();
     let bitset = make_bitset();
     populate(&bitset, JOURNAL_CAP_FILL);
@@ -221,5 +230,69 @@ fn bench_roaring_reopen_after_large_snapshot_65536() -> canbench_rs::BenchResult
         let _p = canbench_rs::bench_scope("roaring_reopen_large");
         let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
         black_box(reopened.contains(black_box(LARGE_SNAPSHOT_BITS as u32)));
+    })
+}
+
+/// Reopen while the journal holds the maximum number of pending records (capacity exactly used, no
+/// prior checkpoint in the measured step). Journal scan + replay cost scales with `JOURNAL_CAP_SLOTS`.
+#[bench(raw)]
+fn bench_roaring_reopen_journal_at_capacity() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, JOURNAL_CAP_FILL);
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_reopen_journal_at_capacity");
+        let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
+        let last = black_box((JOURNAL_CAP_FILL.saturating_sub(1)) as u32);
+        black_box((reopened.len(), reopened.contains(last)));
+    })
+}
+
+/// Replay a long but partial journal — stable read + apply work grows with `REPLAY_THREE_QUARTERS`,
+/// which scales with `JOURNAL_CAP_SLOTS`.
+#[bench(raw)]
+fn bench_roaring_reopen_journal_three_quarters() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, REPLAY_THREE_QUARTERS);
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_reopen_journal_three_quarters");
+        let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
+        let last = black_box((REPLAY_THREE_QUARTERS.saturating_sub(1)) as u32);
+        black_box((reopened.len(), reopened.contains(last)));
+    })
+}
+
+/// Small journal prefix for comparison with `bench_roaring_reopen_journal_*` (should change little
+/// when only `JOURNAL_CAP_SLOTS` changes, since replay stops at the first zero record).
+#[bench(raw)]
+fn bench_roaring_reopen_journal_prefix_small() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, JOURNAL_PREFIX_SMALL);
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_reopen_journal_prefix_small");
+        let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
+        let last = black_box((JOURNAL_PREFIX_SMALL.saturating_sub(1)) as u32);
+        black_box((reopened.len(), reopened.contains(last)));
+    })
+}
+
+/// Repeatedly fill the journal and checkpoint by streaming sequential inserts. Total journal bytes
+/// appended and checkpoint frequency both move with `JOURNAL_CAP_SLOTS`.
+#[bench(raw)]
+fn bench_roaring_sequential_inserts_sustained_journal() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    canbench_rs::bench_fn(|| {
+        wipe::wipe_stable_memory();
+        let bitset = make_bitset();
+        let cap = crate::JOURNAL_CAP_SLOTS as u64;
+        let total_indices = black_box(cap.saturating_mul(JOURNAL_SUSTAINED_CYCLES));
+        let _p = canbench_rs::bench_scope("roaring_seq_inserts_journal");
+        for i in 0..total_indices {
+            bitset.insert(i as u32).expect("sequential insert");
+        }
+        let last = (total_indices.saturating_sub(1)) as u32;
+        black_box((bitset.len(), bitset.contains(black_box(last))));
     })
 }

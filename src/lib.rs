@@ -7,7 +7,7 @@
 //!
 //! # Where documentation lives
 //!
-//! - **This crate root**: disk layout, shared constants ([`JOURNAL_CAP_SLOTS`], [`JOURNAL_LEN_MAX`],
+//! - **This crate root**: disk layout, shared constants (`JOURNAL_CAP_SLOTS`, `JOURNAL_READ_CHUNK_TARGET`, `JOURNAL_READ_CHUNK_MAX`; see `build.rs`, [`JOURNAL_LEN_MAX`],
 //!   record packing via [`JOURNAL_RECORD_RAW_MASK`]), and cross-cutting rules (concurrency, memory
 //!   ownership) that apply to every API.
 //! - **[`RoaringBitmap`] / [`StableRoaringBitmap`]**: durability semantics, checkpoint behavior,
@@ -108,15 +108,10 @@ mod bench;
 pub mod bitmap;
 mod memory;
 
-/// Number of journal slots on stable memory (compile-time constant). Must match the `u64` at
-/// header offset 12 on disk.
-pub const JOURNAL_CAP_SLOTS: usize = 4096;
+include!(concat!(env!("OUT_DIR"), "/journal_layout.rs"));
 
 /// Byte length of the on-disk journal region (`JOURNAL_CAP_SLOTS` records × 5 bytes each).
 pub const JOURNAL_REGION_BYTES: usize = JOURNAL_CAP_SLOTS * 5;
-
-/// `Memory::read` chunk size during journal replay (must divide `JOURNAL_REGION_BYTES` and 5).
-pub const JOURNAL_READ_CHUNK_BYTES: usize = 5120;
 
 const _: () = assert!(JOURNAL_REGION_BYTES.is_multiple_of(JOURNAL_READ_CHUNK_BYTES));
 const _: () = assert!(JOURNAL_READ_CHUNK_BYTES.is_multiple_of(5));
