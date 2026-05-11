@@ -2,7 +2,7 @@
 // Rust-analyzer resolves this committed path without a prior `cargo build`; `cargo build` refreshes when values change.
 
 /// Journal slot capacity set at crate build time; must match header offset `12` (`u64`) on disk.
-pub const JOURNAL_CAP_SLOTS: usize = 8192;
+pub const JOURNAL_CAP_SLOTS: usize = 6144;
 
 /// Replay read granularity: greatest divisor of `JOURNAL_CAP_SLOTS * 5` under `JOURNAL_READ_CHUNK_TARGET`,
 /// capped by `JOURNAL_READ_CHUNK_MAX` (multiples of `5` only).

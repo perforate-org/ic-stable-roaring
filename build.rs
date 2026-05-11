@@ -4,9 +4,10 @@
 //! can load it even before **`target/**` exists**. It is overwritten when the computed layout changes.
 //!
 //! Optional env vars (compile time):
-//! - **`JOURNAL_CAP_SLOTS`** — journal slot capacity (default **`8192`**; any **`usize >= 1`**).
-//!   The default assumes **mutation-heavy** canisters versus cold `init`; smaller values trade more
-//!   frequent checkpoints for a smaller stable journal — see README **Choosing `JOURNAL_CAP_SLOTS`**.
+//! - **`JOURNAL_CAP_SLOTS`** — journal slot capacity (default **`6144`**; any **`usize >= 1`**).
+//!   The default (**6144**) balances **steady mutation** workloads (fewer checkpoints than **`4096`**) against
+//!   a smaller stable journal than **`8192`** and somewhat lighter long-journal replay — see README **Choosing
+//!   `JOURNAL_CAP_SLOTS`**. Larger or smaller caps are compile-time overrides via this env var.
 //!   This value is stored in the stable-memory header; journal size and the rest of the layout derive
 //!   from it, so **Wasm modules compiled with different caps are not interchangeable** on the same
 //!   backing memory unless you migrate externally (see the `ic_stable_roaring` crate README and crate
@@ -87,7 +88,7 @@ fn main() {
         std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set by Cargo");
     let out_path = std::path::Path::new(&manifest_dir).join("generated/journal_layout.rs");
 
-    let slots_str = std::env::var("JOURNAL_CAP_SLOTS").unwrap_or_else(|_| "8192".to_string());
+    let slots_str = std::env::var("JOURNAL_CAP_SLOTS").unwrap_or_else(|_| "6144".to_string());
     let slots: usize = slots_str.parse().unwrap_or_else(|err| {
         panic!("JOURNAL_CAP_SLOTS={slots_str:?} is not a valid usize: {err}");
     });
