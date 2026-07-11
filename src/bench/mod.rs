@@ -29,7 +29,7 @@ const JOURNAL_CAP_FILL: u64 = crate::JOURNAL_CAP_SLOTS as u64;
 const REPLAY_BLOCK: u64 = JOURNAL_CAP_FILL / 4;
 const REPLAY_HALF: u64 = JOURNAL_CAP_FILL / 2;
 
-/// Replay prefix length (~75% of journal capacity) — `JOURNAL_CAP_SLOTS` is a multiple of 4 via `build.rs`.
+/// Replay prefix length (floor of ~75% of journal capacity); every positive capacity is supported.
 const REPLAY_THREE_QUARTERS: u64 = crate::JOURNAL_CAP_SLOTS as u64 * 3 / 4;
 
 /// Small fixed prefix unrelated to journal cap — baseline reopen cost dominated by decode/scan start.

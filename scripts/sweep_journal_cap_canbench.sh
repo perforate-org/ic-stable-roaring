@@ -2,7 +2,7 @@
 # Sweep compile-time `JOURNAL_CAP_SLOTS` and run canbench against this crate.
 #
 # `canbench` loads `canbench.yml`; its build_cmd runs `cargo build`, which reads
-# `JOURNAL_CAP_SLOTS` when this script exports it (see `build.rs` / `generated/journal_layout.rs`).
+# `JOURNAL_CAP_SLOTS` when this script exports it (see `build.rs`, which generates layout constants in Cargo `OUT_DIR`).
 #
 # Usage:
 #   ./scripts/sweep_journal_cap_canbench.sh
