@@ -1,0 +1,10 @@
+# Immutable standard-Roaring snapshot emitted once by roaring =0.11.4.
+# Token format: hexadecimal bytes, or `hh*count` for one repeated byte.
+# Decoded length: 8261 bytes. SHA-256: 452a410389ea901bb0433656050f115ac3cc5ff767e3b7eb0f30d8fac52af1c9
+# Containers: key 0 array {1,5,1000}; key 1 bitmap 0..=5000; key 2 run 100..=1000;
+# key 3 array {7,70,700}; key 4 run 50..=150. Five containers exercise the standard offset table.
+3b3004001400000200010088130200840303000200040064002d0000003300000033200000392000003f20000001000500e803
+ff*624
+ff01000000000000
+00*7560
+01006400840307004600bc02010032006400

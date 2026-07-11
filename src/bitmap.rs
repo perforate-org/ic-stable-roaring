@@ -792,7 +792,12 @@ fn apply_record(state: &mut HeapState, record: JournalRecord) -> Result<(), Init
 mod tests {
     use super::*;
     use ic_stable_structures::{Memory, vec_mem::VectorMemory};
+    use proptest::prelude::*;
+    use std::collections::BTreeSet;
     use std::rc::Rc;
+
+    const HISTORICAL_SNAPSHOT_LEN: u64 = 262_295;
+    const OPERATION_DOMAIN: u32 = 255;
 
     #[derive(Clone)]
     struct FailOnGrowMemory {
@@ -850,6 +855,155 @@ mod tests {
 
     fn reopen<M: Memory>(memory: M) -> RoaringBitmap<M> {
         RoaringBitmap::init(memory).unwrap()
+    }
+
+    /// Decodes the checked-in, whitespace-separated hex/RLE fixture format.
+    ///
+    /// Each token is either an even-length hex byte string or `hh*count`, where `hh` is one byte.
+    /// Keeping the bitmap container as RLE makes the immutable 8 KiB standard-Roaring fixture
+    /// inspectable in source control without asking the current `roaring` writer to reproduce it.
+    fn decode_historical_snapshot() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for line in include_str!("../tests/fixtures/roaring-0.11.4-mixed.hex").lines() {
+            let token = line.split('#').next().unwrap().trim();
+            if token.is_empty() {
+                continue;
+            }
+            let (hex, repeat) = token
+                .split_once('*')
+                .map_or((token, 1usize), |(hex, repeat)| {
+                    (hex, repeat.parse::<usize>().unwrap())
+                });
+            assert!(
+                hex.len().is_multiple_of(2),
+                "fixture token must contain whole bytes"
+            );
+            let mut decoded = Vec::with_capacity(hex.len() / 2);
+            for pair in hex.as_bytes().chunks_exact(2) {
+                decoded.push(u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap());
+            }
+            for _ in 0..repeat {
+                bytes.extend_from_slice(&decoded);
+            }
+        }
+        bytes
+    }
+
+    fn assert_matches_oracle(
+        bitmap: &RoaringBitmap<VectorMemory>,
+        expected_len: u64,
+        expected_set: &BTreeSet<u32>,
+    ) {
+        assert_eq!(bitmap.len(), expected_len);
+        for index in 0..=OPERATION_DOMAIN {
+            assert_eq!(
+                bitmap.contains(index),
+                expected_set.contains(&index),
+                "index {index}"
+            );
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    enum TestOperation {
+        Insert(u32),
+        Clear(u32),
+        EnsureLen(u64),
+        Truncate(u64),
+        Reopen,
+    }
+
+    fn operation_strategy() -> impl Strategy<Value = TestOperation> {
+        prop_oneof![
+            (0..=OPERATION_DOMAIN).prop_map(TestOperation::Insert),
+            (0..=OPERATION_DOMAIN).prop_map(TestOperation::Clear),
+            (0..=u64::from(OPERATION_DOMAIN) + 1).prop_map(TestOperation::EnsureLen),
+            (0..=u64::from(OPERATION_DOMAIN) + 1).prop_map(TestOperation::Truncate),
+            Just(TestOperation::Reopen),
+        ]
+    }
+
+    #[test]
+    fn roaring_snapshot_fixture_reopens() {
+        let snapshot = decode_historical_snapshot();
+        assert_eq!(snapshot.len(), 8_261);
+        let memory = VectorMemory::default();
+        safe_write(&memory, snapshot_base(), &snapshot).unwrap();
+        write_header(&memory, HISTORICAL_SNAPSHOT_LEN, snapshot.len() as u64).unwrap();
+
+        let bitmap = RoaringBitmap::init(memory).unwrap();
+        assert_eq!(bitmap.len(), HISTORICAL_SNAPSHOT_LEN);
+        assert_eq!(bitmap.state.borrow().bitmap.len(), 6_009);
+        for index in [
+            1,
+            5,
+            1_000,
+            1 << 16,
+            (1 << 16) | 5_000,
+            (2 << 16) | 100,
+            (2 << 16) | 1_000,
+            (3 << 16) | 7,
+            (3 << 16) | 700,
+            (4 << 16) | 50,
+            (4 << 16) | 150,
+        ] {
+            assert!(bitmap.contains(index), "expected fixture bit {index}");
+        }
+        for index in [
+            0,
+            999,
+            (1 << 16) | 5_001,
+            (2 << 16) | 99,
+            (2 << 16) | 1_001,
+            (3 << 16) | 8,
+            (4 << 16) | 49,
+            (4 << 16) | 151,
+        ] {
+            assert!(!bitmap.contains(index), "unexpected fixture bit {index}");
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn stateful_operations_survive_reopen(operations in prop::collection::vec(operation_strategy(), 1..96)) {
+            let mut bitmap = RoaringBitmap::new(VectorMemory::default()).unwrap();
+            let mut expected_len = 0;
+            let mut expected_set = BTreeSet::new();
+
+            for operation in operations {
+                match operation {
+                    TestOperation::Insert(index) => {
+                        bitmap.insert(index).unwrap();
+                        expected_set.insert(index);
+                        expected_len = expected_len.max(u64::from(index) + 1);
+                    }
+                    TestOperation::Clear(index) => {
+                        bitmap.clear(index).unwrap();
+                        expected_set.remove(&index);
+                    }
+                    TestOperation::EnsureLen(len) => {
+                        bitmap.ensure_len(len).unwrap();
+                        expected_len = expected_len.max(len);
+                    }
+                    TestOperation::Truncate(len) => {
+                        bitmap.truncate(len).unwrap();
+                        if len < expected_len {
+                            expected_len = len;
+                            expected_set.retain(|index| u64::from(*index) < len);
+                        }
+                    }
+                    TestOperation::Reopen => {
+                        bitmap = reopen(bitmap.into_memory());
+                    }
+                }
+                assert_matches_oracle(&bitmap, expected_len, &expected_set);
+            }
+
+            bitmap = reopen(bitmap.into_memory());
+            assert_matches_oracle(&bitmap, expected_len, &expected_set);
+        }
     }
 
     #[test]

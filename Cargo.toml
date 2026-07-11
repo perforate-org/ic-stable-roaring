@@ -16,6 +16,7 @@ include = [
     "LICENSE-MIT",
     "build.rs",
     "src/**/*",
+    "tests/**/*",
 ]
 
 repository = "https://app.radicle.xyz/nodes/iris.radicle.xyz/rad:zDtjNsMiepkyY2QGnW4NUbjrBExY"
@@ -40,3 +41,6 @@ roaring = "0.11.4"
 canbench-rs = { version = "0.6", optional = true }
 candid = { version = "0.10", optional = true }
 ic-cdk = { version = "0.20", optional = true }
+
+[dev-dependencies]
+proptest = "1.11"

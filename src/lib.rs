@@ -63,6 +63,15 @@
 //! remaining unused journal region. As with `stable-structures`, callers must keep the stable-memory
 //! region isolated and valid.
 //!
+//! ## `roaring` dependency compatibility
+//!
+//! The stable header version describes **this crate's** header and journal layout only. It does
+//! not encode the `roaring` crate version: compatible upstream reader updates should not make an
+//! existing image fail solely because its producer used an older patch release. Dependency updates
+//! are instead gated by the checked-in `roaring` 0.11.4 standard-format fixture in the test suite;
+//! it must continue to reopen semantically. Bump this header version only when this crate changes
+//! its own stable layout or journal encoding.
+//!
 //! ## `JOURNAL_CAP_SLOTS` and layout compatibility
 //!
 //! The header’s **journal slot count** (offset `12`) must equal the crate’s compile-time

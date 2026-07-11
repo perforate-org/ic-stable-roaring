@@ -61,6 +61,14 @@ JOURNAL_CAP_SWEEP_SLOTS='1024 2048 4096 6144' \
 
 `bench_roaring_reopen_journal_fixed_pending_1024` is intentionally omitted when capacity is exactly `1024`: the final pending record would trigger the checkpoint being avoided by that benchmark.
 
+### `roaring` dependency compatibility
+
+The stable-memory header version covers this crate's header and journal layout, **not** the
+`roaring` crate version. Compatible upstream reader updates must keep opening the committed
+standard-Roaring `roaring` 0.11.4 fixture (`tests/fixtures/`); the fixture test checks semantic
+membership rather than expecting new writers to emit byte-identical output. Bump the stable header
+version only when this crate changes its own layout or journal encoding.
+
 ## Usage notes
 
 - Intended for **single-writer** use; do not alias the same stable memory through another API while an instance is live.
