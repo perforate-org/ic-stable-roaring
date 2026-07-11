@@ -99,10 +99,9 @@
 //! The stable memory region should not be mutated through another wrapper while a bitmap instance
 //! is in use.
 //!
-//! [`RoaringBitmap::contains_view`] holds a [`std::cell::RefCell`] read guard until dropped; calling
-//! mutating methods on the same bitmap while that guard is alive will trigger `RefCell`’s runtime
-//! conflict rules (typically `panic!` on the single-threaded IC). Prefer finishing the scan and
-//! dropping the view before writes.
+//! [`RoaringBitmap::contains_view`] holds a [`std::cell::RefCell`] read guard until dropped;
+//! state-changing methods on the same bitmap return [`BitmapError::BorrowConflict`] while that
+//! guard is alive. Prefer finishing the scan and dropping the view before writes.
 //!
 //! # Example
 //!

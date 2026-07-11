@@ -92,6 +92,8 @@ pub enum BitmapError {
     LimitsExceeded { value: u64, max: u64 },
     /// Stable memory could not be grown for a write or checkpoint.
     GrowFailed(crate::GrowFailed),
+    /// A [`ContainsView`] still borrows the heap mirror, so a state-changing operation cannot run.
+    BorrowConflict,
     /// Snapshot serialization or stable write failed (`roaring` / [`std::io::Write`] path).
     Io(String),
 }
@@ -104,6 +106,7 @@ impl fmt::Display for BitmapError {
                 "value {value} exceeds supported limit {max} (JOURNAL_LEN_MAX; u32 index space)"
             ),
             Self::GrowFailed(e) => write!(f, "{e}"),
+            Self::BorrowConflict => write!(f, "bitmap is borrowed by an active ContainsView"),
             Self::Io(msg) => write!(f, "snapshot I/O: {msg}"),
         }
     }
@@ -314,9 +317,8 @@ pub struct RoaringBitmap<M: Memory> {
 /// Obtained from [`RoaringBitmap::contains_view`]. Dropping the view ends the underlying
 /// [`RefCell`] borrow acquired from [`RoaringBitmap`].
 ///
-/// While this view is alive, other uses of the same [`RoaringBitmap`] that need to mutate the
-/// heap state will contend on the `RefCell` (and may `panic!` in Rust's usual `RefCell` rules on
-/// single-threaded hosts).
+/// While this view is alive, state-changing methods on the same [`RoaringBitmap`] return
+/// [`BitmapError::BorrowConflict`].
 pub struct ContainsView<'a> {
     state: Ref<'a, HeapState>,
 }
@@ -574,6 +576,7 @@ impl<M: Memory> RoaringBitmap<M> {
         if min_len <= current {
             return Ok(());
         }
+        self.ensure_mutation_not_borrowed()?;
         self.append_record(JournalRecord::set_len(min_len))?;
         {
             let mut st = self.state.borrow_mut();
@@ -613,6 +616,7 @@ impl<M: Memory> RoaringBitmap<M> {
         }
         if value {
             if !self.contains(index) {
+                self.ensure_mutation_not_borrowed()?;
                 self.append_record(JournalRecord::set_bit(index, true))?;
                 {
                     let mut st = self.state.borrow_mut();
@@ -630,6 +634,7 @@ impl<M: Memory> RoaringBitmap<M> {
         if !self.contains(index) {
             return Ok(());
         }
+        self.ensure_mutation_not_borrowed()?;
         self.append_record(JournalRecord::set_bit(index, false))?;
         {
             let mut st = self.state.borrow_mut();
@@ -675,6 +680,7 @@ impl<M: Memory> RoaringBitmap<M> {
         if new_len >= self.len() {
             return Ok(());
         }
+        self.ensure_mutation_not_borrowed()?;
         self.append_record(JournalRecord::set_len(new_len))?;
         {
             let mut st = self.state.borrow_mut();
@@ -694,6 +700,14 @@ impl<M: Memory> RoaringBitmap<M> {
         let base = journal_offset() + idx * JOURNAL_RECORD_SIZE;
         write_5_bytes(&self.memory, base, &record.0)?;
         self.journal_len.set(idx + 1);
+        Ok(())
+    }
+
+    /// Returns an error before journaling when a [`ContainsView`] holds the heap mirror.
+    fn ensure_mutation_not_borrowed(&self) -> Result<(), BitmapError> {
+        if self.state.try_borrow_mut().is_err() {
+            return Err(BitmapError::BorrowConflict);
+        }
         Ok(())
     }
 
@@ -1171,6 +1185,37 @@ mod tests {
             RoaringBitmap::init(memory),
             Err(InitError::InvalidLayout)
         ));
+    }
+
+    #[test]
+    fn active_contains_view_returns_borrow_conflict_without_journaling() {
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        let view = bs.contains_view();
+        assert!(matches!(bs.ensure_len(1), Err(BitmapError::BorrowConflict)));
+        drop(view);
+        assert_eq!(reopen(bs.into_memory()).len(), 0);
+
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        let view = bs.contains_view();
+        assert!(matches!(bs.insert(0), Err(BitmapError::BorrowConflict)));
+        drop(view);
+        assert!(!reopen(bs.into_memory()).contains(0));
+
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        bs.insert(0).unwrap();
+        let view = bs.contains_view();
+        assert!(matches!(bs.clear(0), Err(BitmapError::BorrowConflict)));
+        drop(view);
+        assert!(reopen(bs.into_memory()).contains(0));
+
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        bs.insert(1).unwrap();
+        let view = bs.contains_view();
+        assert!(matches!(bs.truncate(1), Err(BitmapError::BorrowConflict)));
+        drop(view);
+        let bs = reopen(bs.into_memory());
+        assert_eq!(bs.len(), 2);
+        assert!(bs.contains(1));
     }
 
     #[cfg(journal_slots_ge_1024)]
