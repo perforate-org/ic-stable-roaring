@@ -81,6 +81,26 @@ version only when this crate changes its own layout or journal encoding.
 Run `scripts/test_layout_matrix.sh` to compile and test the default layout plus small-capacity and
 chunk-selection boundary configurations in isolated temporary target directories.
 
+### Fuzzing
+
+The standalone `fuzz/` workspace contains two `cargo-fuzz` targets: `bitmap_operations_reopen`
+checks bounded mutation/reopen sequences against a `BTreeSet` and logical-length oracle, and
+`bitmap_init_bytes` checks that a bounded arbitrary stable-memory image makes `init` return rather
+than panic. Install the pinned nightly toolchain and `cargo-fuzz`, then run from `fuzz/`:
+
+```sh
+rustup toolchain install nightly-2025-08-07 --profile minimal
+cargo +nightly-2025-08-07 install cargo-fuzz --version 0.12.0 --locked
+cd fuzz
+cargo +nightly-2025-08-07 fuzz list
+cargo +nightly-2025-08-07 fuzz build
+cargo +nightly-2025-08-07 fuzz run bitmap_operations_reopen -- -max_total_time=60
+```
+
+`fuzz/corpus/`, `fuzz/artifacts/`, and build output are local-only. To reproduce an artifact, run
+`cargo +nightly-2025-08-07 fuzz run <target> fuzz/artifacts/<target>/<file>`. GitHub Actions only
+builds the targets; it never runs an unbounded corpus search in pull-request CI.
+
 ## Example
 
 ```rust
