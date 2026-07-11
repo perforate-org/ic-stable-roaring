@@ -14,11 +14,11 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Rust 1.90.0
         run: |
-          rustup toolchain install 1.90.0 --profile minimal
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --component clippy
           rustup default 1.90.0
           rustc --version
           cargo --version

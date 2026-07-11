@@ -2,7 +2,8 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
-target_root=${TMPDIR:-/tmp}/ic-stable-roaring-layout-matrix
+target_root=$(mktemp -d "${TMPDIR:-/tmp}/ic-stable-roaring-layout-matrix.XXXXXX")
+trap 'rm -rf -- "$target_root"' EXIT
 
 run_case() {
     local name=$1
