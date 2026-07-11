@@ -128,8 +128,12 @@ impl<M: Memory> Read for MemoryReader<'_, M> {
         if self.offset >= self.end {
             return Ok(0);
         }
-        let remaining = (self.end - self.offset) as usize;
-        let take = remaining.min(buf.len());
+        let remaining = self.end - self.offset;
+        let take = if remaining >= buf.len() as u64 {
+            buf.len()
+        } else {
+            remaining as usize
+        };
         self.memory.read(self.offset, &mut buf[..take]);
         self.offset += take as u64;
         Ok(take)
@@ -205,3 +209,45 @@ impl Display for GrowFailed {
 }
 
 impl error::Error for GrowFailed {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct ZeroMemory;
+
+    impl Memory for ZeroMemory {
+        fn size(&self) -> u64 {
+            u64::MAX / WASM_PAGE_SIZE
+        }
+
+        fn grow(&self, _pages: u64) -> i64 {
+            -1
+        }
+
+        fn read(&self, _offset: u64, dst: &mut [u8]) {
+            dst.fill(0);
+        }
+
+        fn write(&self, _offset: u64, _src: &[u8]) {}
+    }
+
+    #[test]
+    fn reader_handles_remaining_bytes_above_usize_max() {
+        let memory = ZeroMemory;
+        let mut reader = MemoryReader::new(&memory, 0, u64::MAX);
+        let mut buf = [0xFF; 16];
+        assert_eq!(reader.read(&mut buf).unwrap(), buf.len());
+        assert_eq!(buf, [0; 16]);
+    }
+
+    #[test]
+    fn reader_returns_short_final_read_and_eof() {
+        let memory = ZeroMemory;
+        let mut reader = MemoryReader::new(&memory, 0, 3);
+        let mut buf = [0xFF; 16];
+        assert_eq!(reader.read(&mut buf).unwrap(), 3);
+        assert_eq!(&buf[..3], &[0; 3]);
+        assert_eq!(reader.read(&mut buf).unwrap(), 0);
+    }
+}
