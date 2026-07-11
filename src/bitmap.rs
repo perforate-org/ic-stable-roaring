@@ -739,7 +739,7 @@ fn apply_record(state: &mut HeapState, record: JournalRecord) -> Result<(), Init
         JournalTag::Empty => return Err(InitError::InvalidLayout),
         JournalTag::SetLen => {
             let new_len = payload;
-            if new_len > crate::JOURNAL_LEN_MAX {
+            if new_len > crate::JOURNAL_LEN_MAX || new_len == state.len_bits {
                 return Err(InitError::InvalidLayout);
             }
             if new_len < state.len_bits {
@@ -755,6 +755,9 @@ fn apply_record(state: &mut HeapState, record: JournalRecord) -> Result<(), Init
             }
             let index = payload as u32;
             if value {
+                if state.bitmap.contains(index) {
+                    return Err(InitError::InvalidLayout);
+                }
                 let need_len = u64::from(index).saturating_add(1);
                 if need_len > crate::JOURNAL_LEN_MAX {
                     return Err(InitError::InvalidLayout);
@@ -764,6 +767,9 @@ fn apply_record(state: &mut HeapState, record: JournalRecord) -> Result<(), Init
                 }
                 state.bitmap.insert(index);
             } else {
+                if u64::from(index) >= state.len_bits || !state.bitmap.contains(index) {
+                    return Err(InitError::InvalidLayout);
+                }
                 state.bitmap.remove(index);
             }
         }
@@ -992,8 +998,8 @@ mod tests {
     fn idempotent_insert_checkpoints_a_legacy_full_journal() {
         let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
         let memory = bs.into_memory();
-        let record = JournalRecord::set_bit(0, true);
         for slot in 0..crate::JOURNAL_CAP_SLOTS as u64 {
+            let record = JournalRecord::set_bit(slot as u32, true);
             write_5_bytes(
                 &memory,
                 journal_offset() + slot * JOURNAL_RECORD_SIZE,
@@ -1094,6 +1100,10 @@ mod tests {
 
     #[test]
     fn init_rejects_nonzero_journal_after_empty_slot() {
+        if crate::JOURNAL_CAP_SLOTS < 3 {
+            return;
+        }
+
         let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
         let memory = bs.into_memory();
         let record = JournalRecord::set_bit(7, true);
@@ -1123,6 +1133,44 @@ mod tests {
                 Err(InitError::InvalidLayout)
             ));
         }
+    }
+
+    #[test]
+    fn init_rejects_no_op_journal_records() {
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        let memory = bs.into_memory();
+        write_5_bytes(&memory, journal_offset(), &JournalRecord::set_len(0).0).unwrap();
+        assert!(matches!(
+            RoaringBitmap::init(memory),
+            Err(InitError::InvalidLayout)
+        ));
+
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        let memory = bs.into_memory();
+        write_5_bytes(
+            &memory,
+            journal_offset(),
+            &JournalRecord::set_bit(0, false).0,
+        )
+        .unwrap();
+        assert!(matches!(
+            RoaringBitmap::init(memory),
+            Err(InitError::InvalidLayout)
+        ));
+
+        if crate::JOURNAL_CAP_SLOTS < 2 {
+            return;
+        }
+
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        let memory = bs.into_memory();
+        let set_bit = JournalRecord::set_bit(0, true);
+        write_5_bytes(&memory, journal_offset(), &set_bit.0).unwrap();
+        write_5_bytes(&memory, journal_offset() + JOURNAL_RECORD_SIZE, &set_bit.0).unwrap();
+        assert!(matches!(
+            RoaringBitmap::init(memory),
+            Err(InitError::InvalidLayout)
+        ));
     }
 
     #[cfg(journal_slots_ge_1024)]
