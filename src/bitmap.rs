@@ -456,15 +456,20 @@ impl<M: Memory> RoaringBitmap<M> {
         let mut state = HeapState { len_bits, bitmap };
 
         let mut journal_len = 0u64;
+        let mut saw_empty_slot = false;
         let mut chunk_buf = [0u8; crate::JOURNAL_READ_CHUNK_BYTES];
         let n_chunks = crate::JOURNAL_REGION_BYTES / crate::JOURNAL_READ_CHUNK_BYTES;
-        'replay: for chunk_idx in 0..n_chunks {
+        for chunk_idx in 0..n_chunks {
             let off = journal_offset() + (chunk_idx * crate::JOURNAL_READ_CHUNK_BYTES) as u64;
             read_bytes(&memory, off, &mut chunk_buf);
             for slot in chunk_buf.chunks_exact(JOURNAL_RECORD_SIZE as usize) {
                 let slot: [u8; 5] = slot.try_into().expect("chunks_exact by 5");
                 if slot == [0u8; 5] {
-                    break 'replay;
+                    saw_empty_slot = true;
+                    continue;
+                }
+                if saw_empty_slot {
+                    return Err(InitError::InvalidLayout);
                 }
                 apply_record(&mut state, JournalRecord(slot))?;
                 journal_len += 1;
@@ -1065,6 +1070,39 @@ mod tests {
             RoaringBitmap::init(memory),
             Err(InitError::InvalidLayout)
         ));
+    }
+
+    #[test]
+    fn init_rejects_nonzero_journal_after_empty_slot() {
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        let memory = bs.into_memory();
+        let record = JournalRecord::set_bit(7, true);
+
+        write_5_bytes(
+            &memory,
+            journal_offset() + JOURNAL_RECORD_SIZE * 2,
+            &record.0,
+        )
+        .unwrap();
+        assert!(matches!(
+            RoaringBitmap::init(memory),
+            Err(InitError::InvalidLayout)
+        ));
+
+        if crate::JOURNAL_REGION_BYTES > crate::JOURNAL_READ_CHUNK_BYTES {
+            let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+            let memory = bs.into_memory();
+            write_5_bytes(
+                &memory,
+                journal_offset() + crate::JOURNAL_READ_CHUNK_BYTES as u64,
+                &record.0,
+            )
+            .unwrap();
+            assert!(matches!(
+                RoaringBitmap::init(memory),
+                Err(InitError::InvalidLayout)
+            ));
+        }
     }
 
     #[cfg(journal_slots_ge_1024)]
