@@ -387,7 +387,8 @@ impl<M: Memory> RoaringBitmap<M> {
     /// reload (cold start with no pages yet, upgrade with existing bytes, or steady state).
     ///
     /// Validates the header, deserializes the roaring snapshot, reads the fixed-size journal
-    /// region, and reapplies records until the first all-zero slot (see [`crate`]).
+    /// region, replays its contiguous nonzero prefix, and rejects a nonzero record after the
+    /// all-zero tail (see [`crate`]).
     ///
     /// When `memory.size() == 0`, this forwards to [`Self::new`] and maps any [`BitmapError`] to
     /// [`InitError::OutOfMemory`] (storage bootstrap failure).

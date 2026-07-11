@@ -59,7 +59,8 @@
 //! The snapshot is the canonical `RoaringBitmap` serialization (not wire-compatible with older
 //! `RoaringTreemap` snapshots at the same layout version). The journal stores **5-byte** packed
 //! records (40 low bits; see module-level [`JOURNAL_RECORD_RAW_MASK`]); logical lengths are
-//! bounded by [`JOURNAL_LEN_MAX`]. Replay stops at the first all-zero record.
+//! bounded by [`JOURNAL_LEN_MAX`]. Replay applies the contiguous nonzero prefix, then verifies the
+//! remaining fixed journal region is all zero.
 //!
 //! ## `JOURNAL_CAP_SLOTS` and layout compatibility
 //!
