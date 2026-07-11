@@ -52,6 +52,11 @@ The **crate default** (**6144**) is a **middle ground** between **`4096`** and *
 - Holding **`contains_view`** borrows the heap mirror; drop it before other operations on the same bitmap if you would mix reads and writes in one scope (see crate **Concurrency** docs).
 - Logical length upper bound: **`JOURNAL_LEN_MAX`** = `u32::MAX + 1` (see crate docs).
 
+## Development validation
+
+Run `scripts/test_layout_matrix.sh` to compile and test the default layout plus small-capacity and
+chunk-selection boundary configurations in isolated temporary target directories.
+
 ## Example
 
 ```rust
