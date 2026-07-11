@@ -569,7 +569,6 @@ impl<M: Memory> RoaringBitmap<M> {
             let mut st = self.state.borrow_mut();
             st.len_bits = min_len;
         }
-        self.maybe_checkpoint()?;
         Ok(())
     }
 
@@ -612,6 +611,7 @@ impl<M: Memory> RoaringBitmap<M> {
                     }
                     st.bitmap.insert(index);
                 }
+                return Ok(());
             }
             self.maybe_checkpoint()?;
             return Ok(());
@@ -625,7 +625,6 @@ impl<M: Memory> RoaringBitmap<M> {
             let mut st = self.state.borrow_mut();
             st.bitmap.remove(index);
         }
-        self.maybe_checkpoint()?;
         Ok(())
     }
 
@@ -672,7 +671,6 @@ impl<M: Memory> RoaringBitmap<M> {
             st.len_bits = new_len;
             remove_suffix_bits(&mut st.bitmap, new_len);
         }
-        self.maybe_checkpoint()?;
         Ok(())
     }
 
@@ -959,6 +957,46 @@ mod tests {
         assert!(!bs.contains(cleared_index as u32));
         assert!(bs.contains(crate::JOURNAL_CAP_SLOTS as u32));
         assert_eq!(bs.len(), (crate::JOURNAL_CAP_SLOTS + 1) as u64);
+    }
+
+    #[test]
+    fn capacity_one_mutation_avoids_double_checkpoint() {
+        if crate::JOURNAL_CAP_SLOTS != 1 {
+            return;
+        }
+
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        bs.insert(7).unwrap();
+        let memory = bs.into_memory();
+        assert_eq!(
+            read_u64(&memory, SNAPSHOT_LEN_OFFSET),
+            RoaringHeap::new().serialized_size() as u64
+        );
+        let mut record = [0u8; JOURNAL_RECORD_SIZE as usize];
+        memory.read(journal_offset(), &mut record);
+        assert_ne!(record, [0u8; JOURNAL_RECORD_SIZE as usize]);
+        assert!(reopen(memory).contains(7));
+    }
+
+    #[test]
+    fn idempotent_insert_checkpoints_a_legacy_full_journal() {
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        let memory = bs.into_memory();
+        let record = JournalRecord::set_bit(0, true);
+        for slot in 0..crate::JOURNAL_CAP_SLOTS as u64 {
+            write_5_bytes(
+                &memory,
+                journal_offset() + slot * JOURNAL_RECORD_SIZE,
+                &record.0,
+            )
+            .unwrap();
+        }
+
+        let bs = reopen(memory);
+        assert_eq!(bs.journal_len.get(), crate::JOURNAL_CAP_SLOTS as u64);
+        bs.insert(0).unwrap();
+        assert_eq!(bs.journal_len.get(), 0);
+        assert!(reopen(bs.into_memory()).contains(0));
     }
 
     #[test]
