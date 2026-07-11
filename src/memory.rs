@@ -121,6 +121,10 @@ impl<'a, M: Memory> MemoryReader<'a, M> {
             end,
         }
     }
+
+    pub(crate) fn is_exhausted(&self) -> bool {
+        self.offset == self.end
+    }
 }
 
 impl<M: Memory> Read for MemoryReader<'_, M> {

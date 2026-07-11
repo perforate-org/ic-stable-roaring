@@ -444,8 +444,13 @@ impl<M: Memory> RoaringBitmap<M> {
         let bitmap = if snapshot_len_bytes == 0 {
             RoaringHeap::new()
         } else {
-            let reader = MemoryReader::new(&memory, snapshot_base(), snapshot_len_bytes);
-            RoaringHeap::deserialize_from(reader).map_err(|_| InitError::InvalidLayout)?
+            let mut reader = MemoryReader::new(&memory, snapshot_base(), snapshot_len_bytes);
+            let bitmap =
+                RoaringHeap::deserialize_from(&mut reader).map_err(|_| InitError::InvalidLayout)?;
+            if !reader.is_exhausted() {
+                return Err(InitError::InvalidLayout);
+            }
+            bitmap
         };
         if bitmap
             .max()
@@ -1065,6 +1070,21 @@ mod tests {
         bs.checkpoint().unwrap();
         let memory = bs.into_memory();
         memory.write(LEN_OFFSET, &1u64.to_le_bytes());
+
+        assert!(matches!(
+            RoaringBitmap::init(memory),
+            Err(InitError::InvalidLayout)
+        ));
+    }
+
+    #[test]
+    fn init_rejects_snapshot_with_trailing_bytes() {
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        bs.insert(9).unwrap();
+        bs.checkpoint().unwrap();
+        let memory = bs.into_memory();
+        let snapshot_len = read_u64(&memory, SNAPSHOT_LEN_OFFSET);
+        write_u64(&memory, SNAPSHOT_LEN_OFFSET, snapshot_len + 1).unwrap();
 
         assert!(matches!(
             RoaringBitmap::init(memory),
