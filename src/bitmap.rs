@@ -368,13 +368,14 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// **O(1)** with respect to bitmap contents (fixed header and journal layout).
     pub fn new(memory: M) -> Result<Self, BitmapError> {
-        write_header(&memory, 0, 0)?;
         let snap = snapshot_base();
         grow_memory_to_at_least_bytes(&memory, snap)?;
         let journal_end = journal_end_bytes();
+        write_zero_bytes(&memory, journal_offset(), journal_end - journal_offset())?;
         if journal_end < snap {
             write_zero_bytes(&memory, journal_end, snap - journal_end)?;
         }
+        write_header(&memory, 0, 0)?;
         Ok(Self {
             memory,
             state: RefCell::new(HeapState::new()),
@@ -446,6 +447,12 @@ impl<M: Memory> RoaringBitmap<M> {
             let reader = MemoryReader::new(&memory, snapshot_base(), snapshot_len_bytes);
             RoaringHeap::deserialize_from(reader).map_err(|_| InitError::InvalidLayout)?
         };
+        if bitmap
+            .max()
+            .is_some_and(|max_index| u64::from(max_index) >= len_bits)
+        {
+            return Err(InitError::InvalidLayout);
+        }
         let mut state = HeapState { len_bits, bitmap };
 
         let mut journal_len = 0u64;
@@ -907,6 +914,34 @@ mod tests {
         assert!(bs.contains(a));
         assert!(bs.contains(b));
         assert_eq!(bs.len(), u32::MAX as u64 + 1);
+    }
+
+    #[test]
+    fn new_over_existing_memory_does_not_replay_stale_journal() {
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        bs.insert(9).unwrap();
+        let memory = bs.into_memory();
+
+        let bs = RoaringBitmap::new(memory).unwrap();
+        assert_eq!(bs.len(), 0);
+        let memory = bs.into_memory();
+        let bs = reopen(memory);
+        assert_eq!(bs.len(), 0);
+        assert!(!bs.contains(9));
+    }
+
+    #[test]
+    fn init_rejects_snapshot_bits_outside_logical_length() {
+        let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
+        bs.insert(9).unwrap();
+        bs.checkpoint().unwrap();
+        let memory = bs.into_memory();
+        memory.write(LEN_OFFSET, &1u64.to_le_bytes());
+
+        assert!(matches!(
+            RoaringBitmap::init(memory),
+            Err(InitError::InvalidLayout)
+        ));
     }
 
     #[test]
