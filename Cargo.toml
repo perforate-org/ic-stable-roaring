@@ -12,6 +12,8 @@ description = "Persistent Rust Roaring Bitmap for the Internet Computer."
 include = [
     "Cargo.toml",
     "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
     "LICENSE-APACHE",
     "LICENSE-MIT",
     "build.rs",
@@ -19,7 +21,7 @@ include = [
     "tests/**/*",
 ]
 
-repository = "https://app.radicle.xyz/nodes/iris.radicle.xyz/rad:zDtjNsMiepkyY2QGnW4NUbjrBExY"
+repository = "https://github.com/perforate-org/ic-stable-roaring"
 
 readme = "README.md"
 
