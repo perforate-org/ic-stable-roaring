@@ -33,7 +33,7 @@ default = []
 canbench = ["dep:canbench-rs", "dep:candid", "dep:ic-cdk"]
 
 [dependencies]
-ic-stable-structures = "0.7.2"
+ic-stable-structures = "0.7"
 roaring = "0.11.4"
 
 ## canbench
