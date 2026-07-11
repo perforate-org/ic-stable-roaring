@@ -1,7 +1,8 @@
 //! Writes **`journal_layout.rs`** under Cargo's `OUT_DIR`.
 //!
 //! Optional env vars (compile time):
-//! - **`JOURNAL_CAP_SLOTS`** — journal slot capacity (default **`6144`**; any **`usize >= 1`**).
+//! - **`JOURNAL_CAP_SLOTS`** — journal slot capacity (default **`6144`**; any positive **`usize`**
+//!   whose fixed layout addresses fit in `u64`).
 //!   The default (**6144**) balances **steady mutation** workloads (fewer checkpoints than **`4096`**) against
 //!   a smaller stable journal than **`8192`** and somewhat lighter long-journal replay — see README **Choosing
 //!   `JOURNAL_CAP_SLOTS`**. Larger or smaller caps are compile-time overrides via this env var.
@@ -31,6 +32,8 @@ const DEFAULT_CHUNK_TARGET: usize = 5120;
 ///
 /// Keeping this fixed also bounds the divisor search below to at most `32 KiB / 5` candidates.
 const ABSOLUTE_CHUNK_HARD_MAX: usize = 32 * 1024;
+const HEADER_SIZE: u64 = 64;
+const JOURNAL_RECORD_SIZE: u64 = 5;
 
 #[inline]
 fn floor_multiple_of_five(n: usize) -> usize {
@@ -124,6 +127,17 @@ fn main() {
         region >= 5,
         "journal region ({region} bytes): internal invariant violated (need >= one record)"
     );
+    let journal_end = HEADER_SIZE
+        .checked_add(
+            (slots as u64)
+                .checked_mul(JOURNAL_RECORD_SIZE)
+                .expect("JOURNAL_CAP_SLOTS * journal record size must fit in u64"),
+        )
+        .expect("journal end address must fit in u64");
+    let snapshot_base = journal_end
+        .checked_add(7)
+        .expect("aligned snapshot base must fit in u64")
+        & !7;
 
     let read_chunk = choose_journal_read_chunk(region, chunk_target, max_chunk);
 
@@ -133,6 +147,12 @@ fn main() {
          \n\
          /// Journal slot capacity set at crate build time; must match header offset `12` (`u64`) on disk.\n\
          pub const JOURNAL_CAP_SLOTS: usize = {slots};\n\
+         \n\
+         /// Byte offset immediately after the fixed journal region, validated at build time.\n\
+         pub const JOURNAL_END_BYTES: u64 = {journal_end};\n\
+         \n\
+         /// Eight-byte-aligned snapshot start offset, validated at build time.\n\
+         pub const JOURNAL_SNAPSHOT_BASE: u64 = {snapshot_base};\n\
          \n\
          /// Replay read granularity: greatest divisor of `JOURNAL_CAP_SLOTS * 5` under `JOURNAL_READ_CHUNK_TARGET`,\n\
          /// capped by `JOURNAL_READ_CHUNK_MAX` (multiples of `5` only).\n\

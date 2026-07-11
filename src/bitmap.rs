@@ -140,14 +140,12 @@ fn journal_offset() -> u64 {
 
 /// Byte offset just past the last journal slot: `64 + JOURNAL_CAP_SLOTS * 5` (not necessarily 8-aligned).
 fn journal_end_bytes() -> u64 {
-    journal_offset()
-        .saturating_add((crate::JOURNAL_CAP_SLOTS as u64).saturating_mul(JOURNAL_RECORD_SIZE))
+    crate::JOURNAL_END_BYTES
 }
 
 /// Start of the serialized Roaring snapshot; always 8-byte aligned after zero padding.
 fn snapshot_base() -> u64 {
-    let end = journal_end_bytes();
-    (end + 7) & !7
+    crate::JOURNAL_SNAPSHOT_BASE
 }
 
 fn read_header<M: Memory>(memory: &M) -> ([u8; 3], u8, u64, u64, u64) {

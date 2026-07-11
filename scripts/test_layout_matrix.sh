@@ -35,3 +35,4 @@ run_case cap-1 5 JOURNAL_CAP_SLOTS=1
 run_case cap-7-min-chunk 5 JOURNAL_CAP_SLOTS=7 JOURNAL_READ_CHUNK_TARGET=5 JOURNAL_READ_CHUNK_MAX=5
 run_case cap-6-divisor-fallback 15 JOURNAL_CAP_SLOTS=6 JOURNAL_READ_CHUNK_TARGET=25 JOURNAL_READ_CHUNK_MAX=25
 expect_build_failure oversized-chunk-max JOURNAL_READ_CHUNK_MAX=32769
+expect_build_failure overflowing-layout JOURNAL_CAP_SLOTS=3689348814741910309
