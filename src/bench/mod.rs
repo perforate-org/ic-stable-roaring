@@ -1,8 +1,9 @@
 //! PocketIC / `canbench` harness for [`ic_stable_roaring::StableRoaringBitmap`].
 //!
-//! Cross-capacity comparisons: benchmarks whose names contain **`fixed`** hold total writes or pending
-//! journal length **constant** regardless of [`crate::JOURNAL_CAP_SLOTS`].
-//! Fixed-pending **`reopen`** benches are **`cfg`‑gated in `build.rs`** (`journal_slots_ge_1024`,
+//! Cross-capacity comparisons: benchmarks whose names contain **`fixed`** hold their named workload
+//! dimension (total writes, pending journal length, or snapshot size) **constant** regardless of
+//! [`crate::JOURNAL_CAP_SLOTS`].
+//! Fixed-pending **`reopen`** benches are **`cfg`‑gated in `build.rs`** (`journal_slots_gt_1024`,
 //! `journal_slots_ge_4096`) when the crate is built without enough journal capacity.
 
 use std::hint::black_box;
@@ -18,6 +19,7 @@ const TRUNCATE_FROM: u64 = 2_048;
 const TRUNCATE_TO: u64 = 1_024;
 const REOPEN_COUNT: u64 = crate::JOURNAL_CAP_SLOTS as u64;
 const LARGE_SNAPSHOT_BITS: u64 = 65_536;
+const FIXED_CHECKPOINT_SNAPSHOT_BITS: u64 = 65_536;
 const CONTAINS_BITMAP_BITS: u64 = 65_536;
 const CONTAINS_QUERY_COUNT: u64 = 4_096;
 const CONTAINS_QUERY_COUNT_LARGE: u64 = 32_768;
@@ -41,7 +43,7 @@ const JOURNAL_SUSTAINED_CYCLES: u64 = 8;
 /// Sequential `insert` count **independent of journal capacity** (checkpoint cadence varies with cap).
 const FIXED_TOTAL_SEQUENTIAL_INSERTS: u64 = 32_768;
 
-#[cfg(journal_slots_ge_1024)]
+#[cfg(journal_slots_gt_1024)]
 const FIXED_JOURNAL_PENDING_1024: u64 = 1_024;
 
 #[cfg(journal_slots_ge_4096)]
@@ -55,6 +57,16 @@ fn populate(bitset: &StableRoaringBitmap<DefaultMemoryImpl>, count: u64) {
     for index in 0..count {
         bitset.insert(index as u32).expect("insert");
     }
+}
+
+/// Number of pending records after `count` state-changing appends with the preemptive checkpoint
+/// rule. Callers use this only for capacities above one.
+fn pending_records_after_appends(count: u64) -> u64 {
+    if count == 0 {
+        return 0;
+    }
+    let boundary = (crate::JOURNAL_CAP_SLOTS as u64).saturating_sub(1).max(1);
+    1 + (count - 1) % boundary
 }
 
 fn bench_reopen_case(
@@ -222,13 +234,46 @@ fn bench_roaring_truncate_large_suffix_65536_to_32768() -> canbench_rs::BenchRes
 fn bench_roaring_checkpoint_after_full_journal() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();
     let bitset = make_bitset();
-    populate(&bitset, JOURNAL_CAP_FILL);
+    // `append_record` checkpoints before consuming the final slot. Fill exactly up to that
+    // boundary so the measured insert triggers the checkpoint rather than merely appending.
+    populate(&bitset, JOURNAL_CAP_FILL.saturating_sub(1));
     canbench_rs::bench_fn(|| {
         let _p = canbench_rs::bench_scope("roaring_checkpoint");
         bitset
-            .insert(black_box(JOURNAL_CAP_FILL as u32))
+            .insert(black_box(JOURNAL_CAP_FILL.saturating_sub(1) as u32))
             .expect("insert triggering checkpoint");
-        black_box(bitset.contains(black_box(JOURNAL_CAP_FILL as u32)));
+        black_box(bitset.contains(black_box(JOURNAL_CAP_FILL.saturating_sub(1) as u32)));
+    })
+}
+
+/// Checkpoint a fixed-size snapshot after filling the journal boundary with reversible mutations.
+/// Unlike `bench_roaring_checkpoint_after_full_journal`, the snapshot size does not vary with
+/// `JOURNAL_CAP_SLOTS`, so this isolates capacity's effect on checkpoint scheduling and clearing.
+#[bench(raw)]
+fn bench_roaring_checkpoint_fixed_snapshot_65536() -> canbench_rs::BenchResult {
+    if crate::JOURNAL_CAP_SLOTS == 1 {
+        return canbench_rs::BenchResult::default();
+    }
+
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, FIXED_CHECKPOINT_SNAPSHOT_BITS);
+
+    let pending = pending_records_after_appends(FIXED_CHECKPOINT_SNAPSHOT_BITS);
+    let mut bit_zero_is_set = true;
+    for _ in 0..(crate::JOURNAL_CAP_SLOTS as u64 - 1 - pending) {
+        bit_zero_is_set = !bit_zero_is_set;
+        bitset
+            .set(0, bit_zero_is_set)
+            .expect("reversible journal fill");
+    }
+
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_checkpoint_fixed_snapshot_65536");
+        bitset
+            .set(0, !bit_zero_is_set)
+            .expect("set triggering checkpoint");
+        black_box(bitset.contains(black_box(0)));
     })
 }
 
@@ -331,8 +376,9 @@ fn bench_roaring_sequential_inserts_fixed_32768() -> canbench_rs::BenchResult {
 
 /// Reopen with **exactly 1024** pending `insert` journal records (`0..1024`).
 ///
-/// Compiled only when **`JOURNAL_CAP_SLOTS ≥ 1024`** (`build.rs` emits `journal_slots_ge_1024`).
-#[cfg(journal_slots_ge_1024)]
+/// Compiled only when **`JOURNAL_CAP_SLOTS > 1024`** so all 1024 records remain pending without a
+/// preemptive checkpoint (`build.rs` emits `journal_slots_gt_1024`).
+#[cfg(journal_slots_gt_1024)]
 #[bench(raw)]
 fn bench_roaring_reopen_journal_fixed_pending_1024() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();

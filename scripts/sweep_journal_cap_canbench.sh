@@ -6,11 +6,12 @@
 #
 # Usage:
 #   ./scripts/sweep_journal_cap_canbench.sh
-#   ./scripts/sweep_journal_cap_canbench.sh 'bench_roaring_.*fixed'
+#   ./scripts/sweep_journal_cap_canbench.sh bench_roaring_reopen_journal_prefix_small bench_roaring_checkpoint_after_full_journal
 #   CANBENCH_EXTRA_OPTS='--persist' ./scripts/sweep_journal_cap_canbench.sh
 #
-# Note: `--persist` rewrites `canbench_results.yml` every iteration (only the last slot remains). For
-# comparing all slots, rely on the saved `tmp/canbench_journal_sweep/<run_id>/cap_*.log` instead.
+# Each positional argument is a literal substring passed to `canbench`; it is not a regular expression.
+# With no arguments, every benchmark runs once per capacity. `--persist` rewrites
+# `canbench_results.yml` after every benchmark/capacity pair, so rely on the saved logs for sweeps.
 #
 # Environment:
 #   JOURNAL_CAP_SWEEP_SLOTS — space-separated list (default: several sizes including 1024 multiples).
@@ -32,7 +33,7 @@ mkdir -p "$OUT_DIR"
   echo "run_id=$RUN_ID"
   echo "journal_cap_slots_list=$JOURNAL_CAP_SWEEP_SLOTS"
   echo "extra_canbench_opts=$CANBENCH_EXTRA_OPTS"
-  echo "canbench_pattern_ARGS=$*"
+  echo "canbench_literal_patterns=$*"
 } >"$OUT_DIR/SUMMARY.meta"
 
 echo "Sweep output -> $OUT_DIR"
@@ -51,10 +52,25 @@ for SLOTS in $JOURNAL_CAP_SWEEP_SLOTS; do
     base+=("${user_extra[@]}")
   fi
 
-  if ! canbench "$@" "${base[@]}" 2>&1 | tee -a "$LOG"; then
-    FAIL=1
-    echo "canbench failed JOURNAL_CAP_SLOTS=$SLOTS (log: $LOG)" >>"$OUT_DIR/SUMMARY.meta"
+  patterns=("$@")
+  if [[ "${#patterns[@]}" -eq 0 ]]; then
+    patterns=("")
   fi
+
+  for pattern in "${patterns[@]}"; do
+    if [[ -n "$pattern" ]]; then
+      echo "--- canbench substring=$pattern ---" >>"$LOG"
+      command=(canbench "$pattern" "${base[@]}")
+    else
+      echo "--- canbench all benchmarks ---" >>"$LOG"
+      command=(canbench "${base[@]}")
+    fi
+
+    if ! "${command[@]}" 2>&1 | tee -a "$LOG"; then
+      FAIL=1
+      echo "canbench failed JOURNAL_CAP_SLOTS=$SLOTS pattern=${pattern:-all} (log: $LOG)" >>"$OUT_DIR/SUMMARY.meta"
+    fi
+  done
 
   echo >>"$LOG"
 done

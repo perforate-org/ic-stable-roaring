@@ -386,9 +386,8 @@ impl<M: Memory> RoaringBitmap<M> {
     /// **Primary entry point:** open the bitmap from stable memory on every canister entry /
     /// reload (cold start with no pages yet, upgrade with existing bytes, or steady state).
     ///
-    /// Validates the header, deserializes the roaring snapshot, reads the fixed-size journal
-    /// region, replays its contiguous nonzero prefix, and rejects a nonzero record after the
-    /// all-zero tail (see [`crate`]).
+    /// Validates the header, deserializes the roaring snapshot, and replays journal records up to
+    /// the first all-zero slot (see [`crate`]).
     ///
     /// When `memory.size() == 0`, this forwards to [`Self::new`] and maps any [`BitmapError`] to
     /// [`InitError::OutOfMemory`] (storage bootstrap failure).
@@ -405,9 +404,9 @@ impl<M: Memory> RoaringBitmap<M> {
     /// # Time complexity
     ///
     /// Let **S** be the stored snapshot length in bytes and **K** the number of contiguous journal
-    /// records before the first all-zero tail (**K** ≤ [`crate::JOURNAL_CAP_SLOTS`]). Decoding the
-    /// snapshot costs **Θ(S)**. The journal occupies [`crate::JOURNAL_REGION_BYTES`] bytes and is
-    /// read in full. Replaying **K** records costs **Σ** per-record work: typically **O(1)**
+    /// records before the first all-zero slot (**K** ≤ [`crate::JOURNAL_CAP_SLOTS`]). Decoding the
+    /// snapshot costs **Θ(S)**. Recovery reads journal chunks through the chunk containing that
+    /// first empty slot. Replaying **K** records costs **Σ** per-record work: typically **O(1)**
     /// amortized for `SetBit` replay, while a shrinking `SetLen` applies
     /// `remove_range`/`remove_suffix`-style work **O(C)** over roaring containers intersecting the
     /// dropped suffix (`C` ≤ number of containers in the map).
@@ -462,7 +461,6 @@ impl<M: Memory> RoaringBitmap<M> {
         let mut state = HeapState { len_bits, bitmap };
 
         let mut journal_len = 0u64;
-        let mut saw_empty_slot = false;
         let mut chunk_buf = [0u8; crate::JOURNAL_READ_CHUNK_BYTES];
         let n_chunks = crate::JOURNAL_REGION_BYTES / crate::JOURNAL_READ_CHUNK_BYTES;
         for chunk_idx in 0..n_chunks {
@@ -471,11 +469,11 @@ impl<M: Memory> RoaringBitmap<M> {
             for slot in chunk_buf.chunks_exact(JOURNAL_RECORD_SIZE as usize) {
                 let slot: [u8; 5] = slot.try_into().expect("chunks_exact by 5");
                 if slot == [0u8; 5] {
-                    saw_empty_slot = true;
-                    continue;
-                }
-                if saw_empty_slot {
-                    return Err(InitError::InvalidLayout);
+                    return Ok(Self {
+                        memory,
+                        state: RefCell::new(state),
+                        journal_len: Cell::new(journal_len),
+                    });
                 }
                 apply_record(&mut state, JournalRecord(slot))?;
                 journal_len += 1;
@@ -1112,7 +1110,7 @@ mod tests {
     }
 
     #[test]
-    fn init_rejects_nonzero_journal_after_empty_slot() {
+    fn init_stops_replay_at_first_empty_journal_slot() {
         if crate::JOURNAL_CAP_SLOTS < 3 {
             return;
         }
@@ -1127,10 +1125,8 @@ mod tests {
             &record.0,
         )
         .unwrap();
-        assert!(matches!(
-            RoaringBitmap::init(memory),
-            Err(InitError::InvalidLayout)
-        ));
+        let bs = reopen(memory);
+        assert!(!bs.contains(7));
 
         if crate::JOURNAL_REGION_BYTES > crate::JOURNAL_READ_CHUNK_BYTES {
             let bs = RoaringBitmap::new(VectorMemory::default()).unwrap();
@@ -1141,10 +1137,8 @@ mod tests {
                 &record.0,
             )
             .unwrap();
-            assert!(matches!(
-                RoaringBitmap::init(memory),
-                Err(InitError::InvalidLayout)
-            ));
+            let bs = reopen(memory);
+            assert!(!bs.contains(7));
         }
     }
 
