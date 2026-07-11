@@ -289,15 +289,15 @@ impl JournalRecord {
 ///
 /// # Checkpointing and amortization
 ///
-/// The journal holds at most [`crate::JOURNAL_CAP_SLOTS`] records. When a mutation would overflow
-/// it—or when it is already full and a method checks for overflow—the implementation serializes the
-/// heap mirror into the snapshot, rewrites the header, and clears the journal. That **checkpoint**
-/// costs **Θ(S)** time and I/O where **S** is the serialized snapshot size in bytes (and may grow
-/// stable memory). Between checkpoints, bit mutations cost **O(1)** amortized typical roaring work
-/// plus **O(1)** journal I/O per state-changing operation.
+/// The journal holds at most [`crate::JOURNAL_CAP_SLOTS`] records. To ensure a mutation that returns
+/// an error has not been journaled, the implementation checkpoints before an append would consume
+/// the final slot. A full journal from a previous build is checkpointed before any further append.
+/// That **checkpoint** costs **Θ(S)** time and I/O where **S** is the serialized snapshot size in
+/// bytes (and may grow stable memory). Between checkpoints, bit mutations cost **O(1)** amortized
+/// typical roaring work plus **O(1)** journal I/O per state-changing operation.
 ///
 /// A few methods call the overflow check even when no journal append occurs, so **rare Θ(S)**
-/// work can still run when the journal is already full (see [`Self::set`]).
+/// work can still run when opening a legacy full journal (see [`Self::set`]).
 ///
 /// # Concurrency
 ///
@@ -542,7 +542,8 @@ impl<M: Memory> RoaringBitmap<M> {
     /// # Errors
     ///
     /// Returns [`BitmapError::LimitsExceeded`] when `min_len` is greater than [`crate::JOURNAL_LEN_MAX`],
-    /// or other [`BitmapError`] variants when journaling or checkpointing fails.
+    /// or other [`BitmapError`] variants when journaling or checkpointing fails. On any error, this
+    /// call has not changed the logical bitmap.
     ///
     /// # Time complexity
     ///
@@ -584,7 +585,8 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// Returns [`BitmapError::LimitsExceeded`] if `index + 1` as `u64` would exceed [`crate::JOURNAL_LEN_MAX`]
     /// (this is unreachable for any `u32` index, but kept for API symmetry), or other [`BitmapError`]
-    /// variants when journaling or checkpointing fails.
+    /// variants when journaling or checkpointing fails. On any error, this call has not changed the
+    /// logical bitmap.
     ///
     /// # Time complexity
     ///
@@ -644,7 +646,8 @@ impl<M: Memory> RoaringBitmap<M> {
     /// # Errors
     ///
     /// Returns [`BitmapError::LimitsExceeded`] when `new_len` is greater than [`crate::JOURNAL_LEN_MAX`],
-    /// or other [`BitmapError`] variants when journaling or checkpointing fails.
+    /// or other [`BitmapError`] variants when journaling or checkpointing fails. On any error, this
+    /// call has not changed the logical bitmap.
     ///
     /// # Time complexity
     ///
@@ -675,7 +678,8 @@ impl<M: Memory> RoaringBitmap<M> {
 
     /// Appends a packed mutation record to the journal.
     fn append_record(&self, record: JournalRecord) -> Result<(), BitmapError> {
-        if self.journal_len.get() >= crate::JOURNAL_CAP_SLOTS as u64 {
+        let checkpoint_before_append = crate::JOURNAL_CAP_SLOTS as u64 - 1;
+        if self.journal_len.get() >= checkpoint_before_append {
             self.checkpoint()?;
         }
         let idx = self.journal_len.get();
@@ -685,7 +689,7 @@ impl<M: Memory> RoaringBitmap<M> {
         Ok(())
     }
 
-    /// Checkpoints the heap mirror when the journal reaches capacity.
+    /// Checkpoints a full journal left by an older build or an idempotent operation.
     fn maybe_checkpoint(&self) -> Result<(), BitmapError> {
         if self.journal_len.get() >= crate::JOURNAL_CAP_SLOTS as u64 {
             self.checkpoint()?;
@@ -763,8 +767,63 @@ fn apply_record(state: &mut HeapState, record: JournalRecord) -> Result<(), Init
 mod tests {
     use super::*;
     use ic_stable_structures::{Memory, vec_mem::VectorMemory};
+    use std::rc::Rc;
 
-    fn reopen(memory: VectorMemory) -> RoaringBitmap<VectorMemory> {
+    #[derive(Clone)]
+    struct FailOnGrowMemory {
+        inner: VectorMemory,
+        fail_grows: Rc<Cell<bool>>,
+    }
+
+    impl FailOnGrowMemory {
+        fn new() -> Self {
+            Self {
+                inner: VectorMemory::default(),
+                fail_grows: Rc::new(Cell::new(false)),
+            }
+        }
+
+        fn fail_grows(&self) {
+            self.fail_grows.set(true);
+        }
+
+        fn allow_grows(&self) {
+            self.fail_grows.set(false);
+        }
+    }
+
+    impl Memory for FailOnGrowMemory {
+        fn size(&self) -> u64 {
+            self.inner.size()
+        }
+
+        fn grow(&self, pages: u64) -> i64 {
+            if self.fail_grows.get() {
+                -1
+            } else {
+                self.inner.grow(pages)
+            }
+        }
+
+        fn read(&self, offset: u64, dst: &mut [u8]) {
+            self.inner.read(offset, dst);
+        }
+
+        fn write(&self, offset: u64, src: &[u8]) {
+            self.inner.write(offset, src);
+        }
+    }
+
+    #[cfg(journal_slots_ge_1024)]
+    fn fill_journal_for_checkpoint_failure(bs: &RoaringBitmap<FailOnGrowMemory>) {
+        const CONTAINER_STRIDE: u64 = 1 << 16;
+
+        for slot in 0..(crate::JOURNAL_CAP_SLOTS as u64 - 1) {
+            bs.insert((slot * CONTAINER_STRIDE) as u32).unwrap();
+        }
+    }
+
+    fn reopen<M: Memory>(memory: M) -> RoaringBitmap<M> {
         RoaringBitmap::init(memory).unwrap()
     }
 
@@ -798,6 +857,31 @@ mod tests {
         let bs = reopen(mem);
         assert_eq!(bs.len(), 0);
         assert!(bs.is_empty());
+    }
+
+    #[test]
+    fn initialization_reports_grow_failure_without_creating_a_layout() {
+        let memory = FailOnGrowMemory::new();
+        memory.fail_grows();
+        assert!(matches!(
+            RoaringBitmap::new(memory.clone()),
+            Err(BitmapError::GrowFailed(_))
+        ));
+        assert!(matches!(
+            RoaringBitmap::init(memory),
+            Err(InitError::OutOfMemory)
+        ));
+    }
+
+    #[test]
+    fn journal_append_uses_preallocated_memory() {
+        let memory = FailOnGrowMemory::new();
+        let bs = RoaringBitmap::new(memory.clone()).unwrap();
+        memory.fail_grows();
+        bs.insert(0).unwrap();
+        memory.allow_grows();
+        assert!(bs.contains(0));
+        assert!(reopen(bs.into_memory()).contains(0));
     }
 
     #[test]
@@ -862,16 +946,17 @@ mod tests {
         for i in 0..crate::JOURNAL_CAP_SLOTS {
             bs.insert(i as u32).unwrap();
         }
-        bs.clear(1).unwrap();
+        let cleared_index = if crate::JOURNAL_CAP_SLOTS > 1 { 1 } else { 0 };
+        bs.clear(cleared_index as u32).unwrap();
         bs.insert(crate::JOURNAL_CAP_SLOTS as u32).unwrap();
-        assert!(bs.contains(0));
-        assert!(!bs.contains(1));
+        assert_eq!(bs.contains(0), cleared_index != 0);
+        assert!(!bs.contains(cleared_index as u32));
         assert!(bs.contains(crate::JOURNAL_CAP_SLOTS as u32));
         assert_eq!(bs.len(), (crate::JOURNAL_CAP_SLOTS + 1) as u64);
         let mem = bs.into_memory();
         let bs = reopen(mem);
-        assert!(bs.contains(0));
-        assert!(!bs.contains(1));
+        assert_eq!(bs.contains(0), cleared_index != 0);
+        assert!(!bs.contains(cleared_index as u32));
         assert!(bs.contains(crate::JOURNAL_CAP_SLOTS as u32));
         assert_eq!(bs.len(), (crate::JOURNAL_CAP_SLOTS + 1) as u64);
     }
@@ -942,6 +1027,60 @@ mod tests {
             RoaringBitmap::init(memory),
             Err(InitError::InvalidLayout)
         ));
+    }
+
+    #[cfg(journal_slots_ge_1024)]
+    #[test]
+    fn mutation_error_does_not_apply_journaled_change() {
+        const CONTAINER_STRIDE: u64 = 1 << 16;
+        let requested_index = (crate::JOURNAL_CAP_SLOTS as u64 - 1) * CONTAINER_STRIDE;
+
+        let memory = FailOnGrowMemory::new();
+        let bs = RoaringBitmap::new(memory.clone()).unwrap();
+        fill_journal_for_checkpoint_failure(&bs);
+        let len_before = bs.len();
+        memory.fail_grows();
+        assert!(matches!(
+            bs.insert(requested_index as u32),
+            Err(BitmapError::GrowFailed(_))
+        ));
+        memory.allow_grows();
+        assert_eq!(bs.len(), len_before);
+        assert!(!bs.contains(requested_index as u32));
+        let bs = reopen(bs.into_memory());
+        assert_eq!(bs.len(), len_before);
+        assert!(!bs.contains(requested_index as u32));
+
+        let memory = FailOnGrowMemory::new();
+        let bs = RoaringBitmap::new(memory.clone()).unwrap();
+        fill_journal_for_checkpoint_failure(&bs);
+        let len_before = bs.len();
+        memory.fail_grows();
+        assert!(matches!(
+            bs.ensure_len(len_before + 1),
+            Err(BitmapError::GrowFailed(_))
+        ));
+        memory.allow_grows();
+        assert_eq!(bs.len(), len_before);
+        let bs = reopen(bs.into_memory());
+        assert_eq!(bs.len(), len_before);
+
+        let memory = FailOnGrowMemory::new();
+        let bs = RoaringBitmap::new(memory.clone()).unwrap();
+        fill_journal_for_checkpoint_failure(&bs);
+        let len_before = bs.len();
+        let last_index = (len_before - 1) as u32;
+        memory.fail_grows();
+        assert!(matches!(
+            bs.truncate(len_before - 1),
+            Err(BitmapError::GrowFailed(_))
+        ));
+        memory.allow_grows();
+        assert_eq!(bs.len(), len_before);
+        assert!(bs.contains(last_index));
+        let bs = reopen(bs.into_memory());
+        assert_eq!(bs.len(), len_before);
+        assert!(bs.contains(last_index));
     }
 
     #[test]

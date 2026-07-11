@@ -12,7 +12,7 @@ Stable-memory [Roaring Bitmap](https://docs.rs/roaring/latest/roaring/bitmap/str
 | **Crate docs** (`cargo doc --open`, then `ic_stable_roaring`)    | On-disk **layout**, journal packing, **constants** (`JOURNAL_CAP_SLOTS` / `JOURNAL_READ_CHUNK_TARGET` / `JOURNAL_READ_CHUNK_MAX` in `build.rs`, `JOURNAL_LEN_MAX`, …), and crate-wide rules. |
 | **Type & method docs** (`StableRoaringBitmap` / `RoaringBitmap`) | Durability, **checkpointing**, **per-method time bounds**, **`init` as the normal constructor**, and errors (`BitmapError`, `InitError`).                                                    |
 
-Complexity and edge cases (for example checkpoint cost **Θ(S)** when the journal fills, or **O(C)** work when truncating a suffix) live on those API docs—see **Time complexity** on each method.
+Complexity and edge cases (for example checkpoint cost **Θ(S)** before the journal's final slot would be consumed, or **O(C)** work when truncating a suffix) live on those API docs—see **Time complexity** on each method.
 
 ## Operations (overview)
 
@@ -40,7 +40,7 @@ There is **no single optimal** slot count for every canister: behavior depends o
 
 Rough guide:
 
-- **Larger capacity** (for example **8192**) — Under steady **writes**, the journal fills less often, so **full-journal checkpoints occur less frequently** (each checkpoint is costly in snapshot size **S**). You pay a **larger fixed journal region** in stable memory (**`JOURNAL_REGION_BYTES`**) and, in paths that replay a **long** journal, **reopen / replay work can grow** with how much is recorded.
+- **Larger capacity** (for example **8192**) — Under steady **writes**, the journal approaches its final slot less often, so **checkpoints occur less frequently** (each checkpoint is costly in snapshot size **S**). You pay a **larger fixed journal region** in stable memory (**`JOURNAL_REGION_BYTES`**) and, in paths that replay a **long** journal, **reopen / replay work can grow** with how much is recorded.
 - **Smaller capacity** (for example **4096**) — **Smaller** stable layout and somewhat **lower worst-case reopen cost** when large journal backlogs matter, at the price of **more frequent** checkpoints when mutations keep the journal busy.
 
 The **crate default** (**6144**) is a **middle ground** between **`4096`** and **`8192`**: enough headroom to reduce checkpoint pressure versus **`4096`**, with a **`JOURNAL_REGION_BYTES`** of **`6144 × 5`** (30 KiB) instead of **`8192 × 5`** so long-journal **`init`/replay** stays cheaper than under the larger cap under similar backlog. Tune **down** (**4096**) for minimal stable footprint and reopen-heavy patterns, **up** (**8192** or beyond, still `usize`-limited) under very heavy steady writes—the trade-off stays workload-dependent (**`build.rs`** env vars). Migrating after launch always requires **layout-compatible** migration (see above).
