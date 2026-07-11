@@ -9,7 +9,8 @@
 //!   from it, so **Wasm modules compiled with different caps are not interchangeable** on the same
 //!   backing memory unless you migrate externally (see the `ic_stable_roaring` crate README and crate
 //!   root docs).
-//! - **`JOURNAL_READ_CHUNK_MAX`** — hard upper bound on chunk / stack buffer (default **`32768`**).
+//! - **`JOURNAL_READ_CHUNK_MAX`** — optional upper bound on chunk / stack buffer (default **`32768`**;
+//!   cannot exceed the non-overridable **`32768`** byte ceiling).
 //! - **`JOURNAL_READ_CHUNK_TARGET`** — **preferred** upper bound on chunk (default **`5120`**). The
 //!   build picks the **largest** valid chunk **under this cap first**; it must be at least **`5`**.
 //!
@@ -19,15 +20,17 @@
 //!
 //! Rationale: `init` always performs at least one full `Memory::read` of size **`JOURNAL_READ_CHUNK_BYTES`**
 //! before it can know the journal is empty. Capping the **preferred** chunk near the historical
-//! **`5120`** avoids **read amplification** on checkpointed (empty-tail) reopen paths, while still
-//! allowing a larger **`JOURNAL_READ_CHUNK_MAX`** override when you intentionally want fewer, bigger reads.
+//! **`5120`** avoids **read amplification** on checkpointed (empty-tail) reopen paths. Users may
+//! raise **`JOURNAL_READ_CHUNK_MAX`** only up to the fixed stack / buffer ceiling.
 
 /// Default preferred replay read size (`Memory::read` / `[u8; N]` in `bitmap::RoaringBitmap::init`).
 /// Picked to match historical behavior when it divides **`JOURNAL_CAP_SLOTS * 5`**.
 const DEFAULT_CHUNK_TARGET: usize = 5120;
 
-/// Absolute upper bound on `JOURNAL_READ_CHUNK_BYTES` (Wasm stack `[u8; N]`).
-const DEFAULT_CHUNK_HARD_MAX: usize = 32 * 1024;
+/// Non-overridable upper bound on `JOURNAL_READ_CHUNK_BYTES` (Wasm stack `[u8; N]`).
+///
+/// Keeping this fixed also bounds the divisor search below to at most `32 KiB / 5` candidates.
+const ABSOLUTE_CHUNK_HARD_MAX: usize = 32 * 1024;
 
 #[inline]
 fn floor_multiple_of_five(n: usize) -> usize {
@@ -91,13 +94,17 @@ fn main() {
     assert!(slots > 0, "JOURNAL_CAP_SLOTS must be > 0");
 
     let max_chunk_str = std::env::var("JOURNAL_READ_CHUNK_MAX")
-        .unwrap_or_else(|_| DEFAULT_CHUNK_HARD_MAX.to_string());
+        .unwrap_or_else(|_| ABSOLUTE_CHUNK_HARD_MAX.to_string());
     let max_chunk: usize = max_chunk_str.parse().unwrap_or_else(|err| {
         panic!("JOURNAL_READ_CHUNK_MAX={max_chunk_str:?} is not a valid usize: {err}")
     });
     assert!(
         max_chunk >= 5,
         "JOURNAL_READ_CHUNK_MAX ({max_chunk}) must be >= 5 (journal record size)"
+    );
+    assert!(
+        max_chunk <= ABSOLUTE_CHUNK_HARD_MAX,
+        "JOURNAL_READ_CHUNK_MAX ({max_chunk}) exceeds the non-overridable stack limit ({ABSOLUTE_CHUNK_HARD_MAX})"
     );
 
     let chunk_target_str = std::env::var("JOURNAL_READ_CHUNK_TARGET")

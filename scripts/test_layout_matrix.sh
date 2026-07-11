@@ -19,7 +19,19 @@ run_case() {
     rg -Fqx "pub const JOURNAL_READ_CHUNK_BYTES: usize = $expected_chunk;" "$layout"
 }
 
+expect_build_failure() {
+    local name=$1
+    shift
+    local target_dir="$target_root/$name"
+
+    if env CARGO_TARGET_DIR="$target_dir" "$@" cargo check --manifest-path "$repo_root/Cargo.toml"; then
+        echo "expected build failure for $name" >&2
+        exit 1
+    fi
+}
+
 run_case default 5120
 run_case cap-1 5 JOURNAL_CAP_SLOTS=1
 run_case cap-7-min-chunk 5 JOURNAL_CAP_SLOTS=7 JOURNAL_READ_CHUNK_TARGET=5 JOURNAL_READ_CHUNK_MAX=5
 run_case cap-6-divisor-fallback 15 JOURNAL_CAP_SLOTS=6 JOURNAL_READ_CHUNK_TARGET=25 JOURNAL_READ_CHUNK_MAX=25
+expect_build_failure oversized-chunk-max JOURNAL_READ_CHUNK_MAX=32769
