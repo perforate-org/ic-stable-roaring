@@ -23,8 +23,8 @@
 //!   state** (for example, `set` to an already-matching value is a no-op). See method docs on
 //!   [`RoaringBitmap`].
 //! - `remove` is intentionally not part of the API.
-//! - When the journal reaches capacity, the current heap state is checkpointed back into the
-//!   stable snapshot and the journal is cleared.
+//! - Before a mutation would consume the journal's final slot, the current heap state is
+//!   checkpointed back into the stable snapshot and the journal is cleared.
 //!
 //! # Layout
 //!
@@ -122,12 +122,8 @@ mod bench;
 pub mod bitmap;
 mod memory;
 
-// Tracked **`generated/journal_layout.rs`** is kept in sync by `build.rs`. Using
-// `CARGO_MANIFEST_DIR` (not `OUT_DIR`) avoids rust-analyzer "failed to load file" before `cargo build`.
-include!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/generated/journal_layout.rs"
-));
+// `build.rs` generates this file under Cargo's `OUT_DIR` for the active build configuration.
+include!(concat!(env!("OUT_DIR"), "/journal_layout.rs"));
 
 /// Byte length of the on-disk journal region (`JOURNAL_CAP_SLOTS` records × 5 bytes each).
 pub const JOURNAL_REGION_BYTES: usize = JOURNAL_CAP_SLOTS * 5;
