@@ -16,7 +16,7 @@ run_case() {
     local layout
     layout=$(find "$target_dir/debug/build" -path '*/out/journal_layout.rs' -print -quit)
     test -n "$layout"
-    grep -Fqx "pub const JOURNAL_READ_CHUNK_BYTES: usize = $expected_chunk;" "$layout"
+    grep -Fqx "pub(crate) const JOURNAL_READ_CHUNK_BYTES: usize = $expected_chunk;" "$layout"
 }
 
 expect_build_failure() {

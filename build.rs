@@ -146,17 +146,17 @@ fn main() {
          // Cargo creates this file in OUT_DIR for the active build configuration.\n\
          \n\
          /// Journal slot capacity set at crate build time; must match header offset `12` (`u64`) on disk.\n\
-         pub const JOURNAL_CAP_SLOTS: usize = {slots};\n\
+         pub(crate) const JOURNAL_CAP_SLOTS: usize = {slots};\n\
          \n\
          /// Byte offset immediately after the fixed journal region, validated at build time.\n\
-         pub const JOURNAL_END_BYTES: u64 = {journal_end};\n\
+         pub(crate) const JOURNAL_END_BYTES: u64 = {journal_end};\n\
          \n\
          /// Eight-byte-aligned snapshot start offset, validated at build time.\n\
-         pub const JOURNAL_SNAPSHOT_BASE: u64 = {snapshot_base};\n\
+         pub(crate) const JOURNAL_SNAPSHOT_BASE: u64 = {snapshot_base};\n\
          \n\
          /// Replay read granularity: greatest divisor of `JOURNAL_CAP_SLOTS * 5` under `JOURNAL_READ_CHUNK_TARGET`,\n\
          /// capped by `JOURNAL_READ_CHUNK_MAX` (multiples of `5` only).\n\
-         pub const JOURNAL_READ_CHUNK_BYTES: usize = {read_chunk};\n"
+         pub(crate) const JOURNAL_READ_CHUNK_BYTES: usize = {read_chunk};\n"
     );
     write_if_changed(&out_path, &contents);
 

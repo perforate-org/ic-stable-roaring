@@ -1,4 +1,4 @@
-# ic-stable-roaring
+# IC Stable Roaring
 
 Persistent [Roaring Bitmap](https://docs.rs/roaring/latest/roaring/bitmap/struct.RoaringBitmap.html)
 for [Internet Computer](https://internetcomputer.org/) canisters. It stores bitmap state in stable
@@ -36,29 +36,35 @@ assert!(bitmap.contains(42));
 - `len` is the exclusive logical bit length, not the number of set bits.
 - Do not mutate the same `Memory` through another structure while a bitmap uses it.
 
-## Storage configuration
+## Journal capacity
 
-The default `JOURNAL_CAP_SLOTS` is **4096** (a 20 KiB journal). It balances writes with bounded
-worst-case reopen work. Raise it only for a write-heavy workload that can accept slower recovery of
-a long pending journal.
+The default `JOURNAL_CAP_SLOTS` compile-time setting is **4096** (a 20 KiB journal). Raise it only
+for a write-heavy workload that can accept slower recovery of a long pending journal.
 
-The capacity is stored in the stable header. Builds with different capacities are not compatible on
-the same stable-memory image; migrate into fresh storage before changing it in a live canister.
+The capacity is stored in the stable header. Builds with different capacities are incompatible on
+the same stable-memory image; migrate into fresh storage before changing it for a live canister.
 
 `init` expects valid, isolated stable memory. It validates the reachable header, snapshot, and
 journal prefix, then stops at the first empty journal record.
 
 ## Documentation
 
-Run `cargo doc --open` for API contracts, error types, stable layout, durability, and per-method
-complexity. See [CONTRIBUTING.md](./CONTRIBUTING.md) for development checks and layout-change rules.
+- [API reference](https://docs.rs/ic-stable-roaring/latest/ic_stable_roaring/): public API, errors,
+  durability, and complexity.
+- [Stable-memory layout and recovery](https://docs.rs/ic-stable-roaring/latest/ic_stable_roaring/bitmap/)
+- [Contributing guide](https://github.com/perforate-org/ic-stable-roaring/blob/main/CONTRIBUTING.md):
+  development checks and layout-change rules.
 
 ## Contributing
 
-Issues and pull requests are welcome at [GitHub](https://github.com/perforate-org/ic-stable-roaring).
-Please read [CONTRIBUTING.md](./CONTRIBUTING.md) and [SECURITY.md](./SECURITY.md) first.
+Issues and pull requests are welcome on
+[GitHub](https://github.com/perforate-org/ic-stable-roaring). Please read the
+[contributing guide](https://github.com/perforate-org/ic-stable-roaring/blob/main/CONTRIBUTING.md)
+and [security policy](https://github.com/perforate-org/ic-stable-roaring/blob/main/SECURITY.md)
+first.
 
 ## License
 
-Licensed under either [Apache License, Version 2.0](./LICENSE-APACHE) or
-[MIT License](./LICENSE-MIT), at your option.
+Licensed under either
+[Apache License, Version 2.0](https://github.com/perforate-org/ic-stable-roaring/blob/main/LICENSE-APACHE)
+or [MIT License](https://github.com/perforate-org/ic-stable-roaring/blob/main/LICENSE-MIT), at your option.

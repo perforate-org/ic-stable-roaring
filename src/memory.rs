@@ -175,7 +175,8 @@ impl<M: Memory> Write for MemoryWriter<'_, M> {
 /// Stable memory could not be grown to satisfy a write, checkpoint, or initialization layout.
 ///
 /// Surfaced by [`crate::RoaringBitmap::new`], [`crate::RoaringBitmap`] mutators, and helpers in this
-/// module. Page counts come from [`ic_stable_structures::Memory::grow`].
+/// module. Page counts come from
+/// [`Memory::grow`](https://docs.rs/ic-stable-structures/latest/ic_stable_structures/trait.Memory.html#tymethod.grow).
 #[derive(Debug, PartialEq, Eq)]
 pub struct GrowFailed {
     current_size: u64,

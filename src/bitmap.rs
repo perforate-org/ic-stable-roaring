@@ -1,8 +1,56 @@
-//! Roaring bitmap types backed by [`ic_stable_structures::Memory`].
+//! Roaring bitmap types backed by the
+//! [`Memory`](https://docs.rs/ic-stable-structures/latest/ic_stable_structures/trait.Memory.html)
+//! trait.
 //!
-//! Stable-memory layout, journal packing, and crate-wide constants are documented on [`crate`].
-//! This module focuses on the [`RoaringBitmap`] API: durability, checkpoint behavior, and
-//! per-method costs. Application code should construct values with [`RoaringBitmap::init`].
+//! Application code should construct values with [`RoaringBitmap::init`]. This module documents
+//! the stable layout; [`RoaringBitmap`] documents runtime behavior and per-method costs.
+//!
+//! # V1 layout
+//!
+//! ```text
+//! ---------------------------------------- <- Address 0
+//! Magic `RSB`                 ↕ 3 bytes
+//! ----------------------------------------
+//! Layout version              ↕ 1 byte
+//! ----------------------------------------
+//! Logical length (`len_bits`) ↕ 8 bytes
+//! ----------------------------------------
+//! Journal slot count          ↕ 8 bytes
+//! ----------------------------------------
+//! Snapshot length             ↕ 8 bytes
+//! ----------------------------------------
+//! Reserved space              ↕ 36 bytes
+//! ---------------------------------------- <- Address 64
+//! Mutation record 0           ↕ 5 bytes
+//! ----------------------------------------
+//! Mutation record 1           ↕ 5 bytes
+//! ----------------------------------------
+//! ...
+//! ----------------------------------------
+//! Mutation record N - 1       ↕ 5 bytes
+//! ---------------------------------------- <- 64 + JOURNAL_CAP_SLOTS * 5
+//! Zero padding                ↕ 0..7 bytes
+//! ---------------------------------------- <- snapshot_base = align_up(journal end, 8)
+//! Serialized Roaring snapshot ↕ variable length
+//! ```
+//!
+//! The header is 64 bytes. Journal records are packed into five bytes, and the snapshot begins at
+//! the next eight-byte boundary. The snapshot uses the standard
+//! [`roaring::RoaringBitmap`](https://docs.rs/roaring/latest/roaring/bitmap/struct.RoaringBitmap.html)
+//! serialization format.
+//!
+//! # Compatibility and recovery
+//!
+//! `JOURNAL_CAP_SLOTS` is stored in the header. A build with a different capacity has a
+//! different journal and snapshot offset, so it cannot reopen existing memory without an
+//! application-level migration; [`RoaringBitmap::init`] returns [`InitError::InvalidLayout`].
+//!
+//! Recovery validates the reachable header and snapshot, then replays journal records until the
+//! first empty record. It deliberately does not inspect unreachable bytes after that point. The
+//! caller must therefore keep the memory region isolated from untrusted writers.
+//!
+//! The header version describes this crate's layout, not the `roaring` crate version. Compatibility
+//! with the supported Roaring serialization format is covered by a checked-in historical fixture.
 
 use crate::memory::{
     MemoryReader, MemoryWriter, grow_memory_to_at_least_bytes, read_bytes, read_u64, safe_write,
@@ -21,7 +69,7 @@ const JOURNAL_RECORD_SIZE: u64 = 5;
 const MAGIC_OFFSET: u64 = 0;
 const VERSION_OFFSET: u64 = 3;
 const LEN_OFFSET: u64 = 4;
-/// Header field: must equal [`crate::JOURNAL_CAP_SLOTS`] as `u64` (fixed journal size on disk).
+/// Header field: must equal the build-time journal capacity as `u64` (fixed journal size on disk).
 const JOURNAL_SLOTS_METADATA_OFFSET: u64 = 12;
 const SNAPSHOT_LEN_OFFSET: u64 = 20;
 
@@ -51,7 +99,7 @@ fn remove_suffix_bits(bitmap: &mut RoaringHeap, start_exclusive: u64) {
 /// Error returned when [`RoaringBitmap::init`] rejects stable memory contents.
 #[derive(Debug, PartialEq, Eq)]
 pub enum InitError {
-    /// The first three bytes were not the expected `RSB` magic (see the [`crate`] layout section).
+    /// The first three bytes were not the expected `RSB` magic (see the [`crate::bitmap`] layout).
     BadMagic { actual: [u8; 3], expected: [u8; 3] },
     /// Header layout version is not supported by this build.
     IncompatibleVersion(u8),
@@ -59,7 +107,7 @@ pub enum InitError {
     /// snapshot bytes, or journal records that fail validation during replay.
     ///
     /// This includes a **journal slot count** in the header (offset `12`) that does not equal
-    /// [`crate::JOURNAL_CAP_SLOTS`]—for example opening stable memory written by a build compiled
+    /// the build-time journal capacity—for example opening stable memory written by a build compiled
     /// with a different journal capacity.
     InvalidLayout,
     /// [`RoaringBitmap::init`] on empty memory calls [`RoaringBitmap::new`]; bootstrap failures there
@@ -88,7 +136,7 @@ impl std::error::Error for InitError {}
 /// Error returned by [`RoaringBitmap::new`] and mutating methods (`set`, `ensure_len`, checkpoint I/O, …).
 #[derive(Debug, PartialEq, Eq)]
 pub enum BitmapError {
-    /// `len` or `index + 1` is greater than [`crate::JOURNAL_LEN_MAX`].
+    /// `len` or `index + 1` exceeds the supported logical bit length.
     LimitsExceeded { value: u64, max: u64 },
     /// Stable memory could not be grown for a write or checkpoint.
     GrowFailed(crate::GrowFailed),
@@ -151,7 +199,7 @@ fn snapshot_base() -> u64 {
 /// On-disk header for the current layout.
 ///
 /// `journal_slots` (offset `12`, `u64`) records the build-time journal capacity this image was
-/// created with. [`RoaringBitmap::init`] rejects a mismatch with [`crate::JOURNAL_CAP_SLOTS`],
+/// created with. [`RoaringBitmap::init`] rejects a capacity mismatch,
 /// preventing an upgraded canister with a different capacity from misinterpreting the
 /// journal/snapshot layout.
 #[repr(C)]
@@ -314,21 +362,22 @@ impl JournalRecord {
 ///
 /// # Documentation split
 ///
-/// - **[`crate`]**: on-disk layout, [`crate::JOURNAL_CAP_SLOTS`], [`crate::JOURNAL_LEN_MAX`], packed
-///   journal record format, and concurrency rules shared across the crate.
+/// - **[`crate::bitmap`]**: on-disk layout, packed journal record format, and compatibility rules.
 /// - **`RoaringBitmap` (this type)**: logical length semantics (`len`, out-of-range `contains`),
 ///   what is persisted when, [`Self::init`] as the normal entry point (canister code), checkpoint
 ///   behavior, and method-level complexity.
 ///
 /// # Storage model
 ///
-/// Reads use a heap-backed [`RoaringHeap`] (`roaring` crate). Writes append **5-byte** journal
-/// records (see [`crate`]) and update that mirror. A serialized roaring snapshot in stable memory
-/// starts at an 8-byte aligned offset after the journal region (with up to 7 bytes of zero padding).
+/// Reads use a heap-backed
+/// [`roaring::RoaringBitmap`](https://docs.rs/roaring/latest/roaring/bitmap/struct.RoaringBitmap.html).
+/// Writes append **5-byte** journal records (see [`crate::bitmap`]) and update that mirror. A
+/// serialized roaring snapshot in stable memory starts at an 8-byte aligned offset after the
+/// journal region (with up to 7 bytes of zero padding).
 ///
 /// # Checkpointing and amortization
 ///
-/// The journal holds at most [`crate::JOURNAL_CAP_SLOTS`] records. To ensure a mutation that returns
+/// The journal holds a fixed build-time number of records. To ensure a mutation that returns
 /// an error has not been journaled, the implementation checkpoints before an append would consume
 /// the final slot. A full journal from a previous build is checkpointed before any further append.
 /// That **checkpoint** costs **Θ(S)** time and I/O where **S** is the serialized snapshot size in
@@ -435,14 +484,14 @@ impl<M: Memory> RoaringBitmap<M> {
     /// Returns [`InitError`] when magic/version/journal metadata disagree, lengths are inconsistent
     /// with the backing memory, the snapshot deserialize fails, or a journal record fails
     /// validation. In particular, the header **`journal_slots` field must match
-    /// [`crate::JOURNAL_CAP_SLOTS`]**: otherwise [`InitError::InvalidLayout`] is returned—stable
+    /// the build-time journal capacity**: otherwise [`InitError::InvalidLayout`] is returned—stable
     /// memory laid out under a **different compile-time journal capacity cannot be reused** without an
     /// application-level migration.
     ///
     /// # Time complexity
     ///
     /// Let **S** be the stored snapshot length in bytes and **K** the number of contiguous journal
-    /// records before the first all-zero slot (**K** ≤ [`crate::JOURNAL_CAP_SLOTS`]). Decoding the
+    /// records before the first all-zero slot. Decoding the
     /// snapshot costs **Θ(S)**. Recovery reads journal chunks through the chunk containing that
     /// first empty slot. Replaying **K** records costs **Σ** per-record work: typically **O(1)**
     /// amortized for `SetBit` replay, while a shrinking `SetLen` applies
@@ -581,7 +630,7 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// # Errors
     ///
-    /// Returns [`BitmapError::LimitsExceeded`] when `min_len` is greater than [`crate::JOURNAL_LEN_MAX`],
+    /// Returns [`BitmapError::LimitsExceeded`] when `min_len` exceeds the supported logical bit length,
     /// or other [`BitmapError`] variants when journaling or checkpointing fails. On any error, this
     /// call has not changed the logical bitmap.
     ///
@@ -623,7 +672,7 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// # Errors
     ///
-    /// Returns [`BitmapError::LimitsExceeded`] if `index + 1` as `u64` would exceed [`crate::JOURNAL_LEN_MAX`]
+    /// Returns [`BitmapError::LimitsExceeded`] if `index + 1` as `u64` would exceed the supported logical bit length
     /// (this is unreachable for any `u32` index, but kept for API symmetry), or other [`BitmapError`]
     /// variants when journaling or checkpointing fails. On any error, this call has not changed the
     /// logical bitmap.
@@ -687,7 +736,7 @@ impl<M: Memory> RoaringBitmap<M> {
     ///
     /// # Errors
     ///
-    /// Returns [`BitmapError::LimitsExceeded`] when `new_len` is greater than [`crate::JOURNAL_LEN_MAX`],
+    /// Returns [`BitmapError::LimitsExceeded`] when `new_len` exceeds the supported logical bit length,
     /// or other [`BitmapError`] variants when journaling or checkpointing fails. On any error, this
     /// call has not changed the logical bitmap.
     ///
