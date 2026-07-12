@@ -118,10 +118,13 @@
 //!
 //! ```rust
 //! # use ic_stable_roaring::StableRoaringBitmap;
-//! # use ic_stable_structures::DefaultMemoryImpl;
+//! # use ic_stable_structures::{
+//! #     memory_manager::{MemoryId, MemoryManager},
+//! #     DefaultMemoryImpl,
+//! # };
 //!
-//! let memory = DefaultMemoryImpl::default();
-//! let bitset = StableRoaringBitmap::init(memory).unwrap();
+//! let memory_manager = MemoryManager::init(DefaultMemoryImpl::default());
+//! let bitset = StableRoaringBitmap::init(memory_manager.get(MemoryId::new(0))).unwrap();
 //!
 //! bitset.insert(7).unwrap();
 //! assert!(bitset.contains(7));

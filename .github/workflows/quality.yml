@@ -40,6 +40,9 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
+      - name: Build documentation
+        run: cargo doc --locked --no-deps --all-features
+
       - name: Run journal layout matrix
         run: scripts/test_layout_matrix.sh
 
