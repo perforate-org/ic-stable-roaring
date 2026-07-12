@@ -12,6 +12,8 @@ description = "Persistent Rust Roaring Bitmap for the Internet Computer."
 include = [
     "Cargo.toml",
     "README.md",
+    "CONTRIBUTING.md",
+    "RELEASING.md",
     "CHANGELOG.md",
     "SECURITY.md",
     "LICENSE-APACHE",
