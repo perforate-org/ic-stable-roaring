@@ -1,9 +1,11 @@
 /.github/       @perforate-org/maintainers
-/fuzz/          @perforate-org/maintainers
-/scripts/       @perforate-org/maintainers
-/src/           @perforate-org/maintainers
-/tests/         @perforate-org/maintainers
 /build.rs       @perforate-org/maintainers
 /Cargo.toml     @perforate-org/maintainers
+/deny.toml      @perforate-org/maintainers
+/fuzz/          @perforate-org/maintainers
 /RELEASING.md   @perforate-org/maintainers
+/rust-toolchain.toml @perforate-org/maintainers
+/scripts/       @perforate-org/maintainers
 /SECURITY.md    @perforate-org/maintainers
+/src/           @perforate-org/maintainers
+/tests/         @perforate-org/maintainers
