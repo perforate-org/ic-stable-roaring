@@ -44,5 +44,15 @@ GitHub Actions quality and fuzz-build jobs are green.
 
 1. Commit the release preparation.
 2. Create and push an annotated `v<version>` tag.
-3. Run `cargo publish` from the clean tagged commit.
-4. Create the corresponding GitHub Release using the `CHANGELOG.md` entry.
+3. Confirm that the `crates-io` GitHub environment requires maintainer approval and is restricted
+   to `v*` tags.
+4. Confirm that the crate's crates.io Trusted Publisher points to this repository's `Release`
+   workflow and the `crates-io` environment.
+5. Approve the release workflow when the environment requests approval.
+6. Verify the published crate, package checksum, SBOM, and artifact attestation.
+
+For the first release, publish once manually from the clean tagged commit, then configure the
+crates.io Trusted Publisher for the `Release` workflow before using this workflow for subsequent
+releases. Do not store a long-lived crates.io token in GitHub Actions secrets.
+
+Create the corresponding GitHub Release using the `CHANGELOG.md` entry after the workflow succeeds.

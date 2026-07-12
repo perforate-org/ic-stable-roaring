@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust 1.90.0
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustc +1.90.0 --version
+          cargo +1.90.0 --version
+
+      - name: Resolve dependencies
+        run: cargo +1.90.0 generate-lockfile
+
+      - name: Verify release version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag_version="${TAG_NAME#v}"
+          crate_version="$(cargo +1.90.0 metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "ic-stable-roaring") | .version')"
+          changelog_version="$(sed -n 's/^## \([0-9][^ ]*\)$/\1/p' CHANGELOG.md | head -n 1)"
+
+          test "$tag_version" = "$crate_version"
+          test "$tag_version" = "$changelog_version"
+
+      - name: Package crate
+        run: cargo +1.90.0 package --locked
+
+      - name: Validate publication
+        run: cargo +1.90.0 publish --dry-run --locked
+
+      - name: Generate SBOM
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cargo +1.90.0 install cargo-cyclonedx --version 0.5.9 --locked
+          cargo +1.90.0 cyclonedx --all-features --format json --spec-version 1.5
+          mv bom.json release/sbom.json
+
+      - name: Generate package checksum
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          sha256sum target/package/ic-stable-roaring-*.crate > release/package.sha256
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ic-stable-roaring-${{ github.ref_name }}
+          path: |
+            target/package/*.crate
+            release/package.sha256
+            release/sbom.json
+          if-no-files-found: error
+
+      - name: Attest release artifacts
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: |
+            target/package/*.crate
+            release/package.sha256
+            release/sbom.json
+
+      - name: Authenticate to crates.io
+        uses: rust-lang/crates-io-auth-action@1a7afc2bc1530b81a443462a0bf0c991f6638eac # v1.0.5
+
+      - name: Publish crate
+        run: cargo +1.90.0 publish --locked
