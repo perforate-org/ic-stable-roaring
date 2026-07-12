@@ -148,21 +148,68 @@ fn snapshot_base() -> u64 {
     crate::JOURNAL_SNAPSHOT_BASE
 }
 
-fn read_header<M: Memory>(memory: &M) -> ([u8; 3], u8, u64, u64, u64) {
+/// On-disk header for the current layout.
+///
+/// `journal_slots` (offset `12`, `u64`) records the build-time journal capacity this image was
+/// created with. [`RoaringBitmap::init`] rejects a mismatch with [`crate::JOURNAL_CAP_SLOTS`],
+/// preventing an upgraded canister with a different capacity from misinterpreting the
+/// journal/snapshot layout.
+#[repr(C)]
+#[derive(Debug)]
+struct Header {
+    magic: [u8; 3],
+    version: u8,
+    len_bits: u64,
+    journal_slots: u64,
+    snapshot_len_bytes: u64,
+}
+
+impl Header {
+    fn new(len_bits: u64, snapshot_len_bytes: u64) -> Self {
+        Self {
+            magic: MAGIC,
+            version: VERSION,
+            len_bits,
+            journal_slots: crate::JOURNAL_CAP_SLOTS as u64,
+            snapshot_len_bytes,
+        }
+    }
+
+    fn read_fields<M: Memory>(memory: &M) -> Self {
+        Self {
+            magic: MAGIC,
+            version: VERSION,
+            len_bits: read_u64(memory, LEN_OFFSET),
+            journal_slots: read_u64(memory, JOURNAL_SLOTS_METADATA_OFFSET),
+            snapshot_len_bytes: read_u64(memory, SNAPSHOT_LEN_OFFSET),
+        }
+    }
+
+    fn write<M: Memory>(&self, memory: &M) -> Result<(), crate::GrowFailed> {
+        safe_write(memory, MAGIC_OFFSET, &self.magic)?;
+        safe_write(memory, VERSION_OFFSET, &[self.version])?;
+        write_u64(memory, LEN_OFFSET, self.len_bits)?;
+        write_u64(memory, JOURNAL_SLOTS_METADATA_OFFSET, self.journal_slots)?;
+        write_u64(memory, SNAPSHOT_LEN_OFFSET, self.snapshot_len_bytes)?;
+        Ok(())
+    }
+}
+
+fn read_header<M: Memory>(memory: &M) -> Result<Header, InitError> {
     let mut magic = [0u8; 3];
     let mut version = [0u8; 1];
     memory.read(MAGIC_OFFSET, &mut magic);
     memory.read(VERSION_OFFSET, &mut version);
-    let len_bits = read_u64(memory, LEN_OFFSET);
-    let journal_slots = read_u64(memory, JOURNAL_SLOTS_METADATA_OFFSET);
-    let snapshot_len_bytes = read_u64(memory, SNAPSHOT_LEN_OFFSET);
-    (
-        magic,
-        version[0],
-        len_bits,
-        snapshot_len_bytes,
-        journal_slots,
-    )
+    if magic != MAGIC {
+        return Err(InitError::BadMagic {
+            actual: magic,
+            expected: MAGIC,
+        });
+    }
+    if version[0] != VERSION {
+        return Err(InitError::IncompatibleVersion(version[0]));
+    }
+    Ok(Header::read_fields(memory))
 }
 
 fn write_header<M: Memory>(
@@ -170,16 +217,7 @@ fn write_header<M: Memory>(
     len_bits: u64,
     snapshot_len_bytes: u64,
 ) -> Result<(), crate::GrowFailed> {
-    safe_write(memory, MAGIC_OFFSET, &MAGIC)?;
-    safe_write(memory, VERSION_OFFSET, &[VERSION])?;
-    write_u64(memory, LEN_OFFSET, len_bits)?;
-    write_u64(
-        memory,
-        JOURNAL_SLOTS_METADATA_OFFSET,
-        crate::JOURNAL_CAP_SLOTS as u64,
-    )?;
-    write_u64(memory, SNAPSHOT_LEN_OFFSET, snapshot_len_bytes)?;
-    Ok(())
+    Header::new(len_bits, snapshot_len_bytes).write(memory)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -414,19 +452,12 @@ impl<M: Memory> RoaringBitmap<M> {
         if memory.size() == 0 {
             return Self::new(memory).map_err(|_| InitError::OutOfMemory);
         }
-        let (magic, version, len_bits, snapshot_len_bytes, journal_slots) = read_header(&memory);
-        if magic != MAGIC {
-            return Err(InitError::BadMagic {
-                actual: magic,
-                expected: MAGIC,
-            });
-        }
-        if version != VERSION {
-            return Err(InitError::IncompatibleVersion(version));
-        }
-        if journal_slots != crate::JOURNAL_CAP_SLOTS as u64 {
+        let header = read_header(&memory)?;
+        if header.journal_slots != crate::JOURNAL_CAP_SLOTS as u64 {
             return Err(InitError::InvalidLayout);
         }
+        let len_bits = header.len_bits;
+        let snapshot_len_bytes = header.snapshot_len_bytes;
         let need = snapshot_base()
             .checked_add(snapshot_len_bytes)
             .ok_or(InitError::InvalidLayout)?;
