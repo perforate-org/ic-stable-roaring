@@ -23,6 +23,7 @@ include = [
     "tests/**/*",
 ]
 
+documentation = "https://docs.rs/ic-stable-roaring/"
 repository = "https://github.com/perforate-org/ic-stable-roaring"
 
 readme = "README.md"
