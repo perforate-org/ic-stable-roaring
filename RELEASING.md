@@ -11,15 +11,23 @@ This guide is for maintainers publishing `ic-stable-roaring`.
 
 ## Validate
 
+Because this is a library crate, the root `Cargo.lock` is intentionally not committed.
+Generate it at the start of the release validation so all subsequent commands use the same
+resolved dependency graph:
+
+```sh
+cargo generate-lockfile
+```
+
 Run the normal quality checks:
 
 ```sh
 cargo fmt --check
-cargo test --all-features
-cargo clippy --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
+cargo clippy --locked --all-targets --all-features -- -D warnings
 scripts/test_layout_matrix.sh
-cargo package --list
-cargo publish --dry-run
+cargo package --locked --list
+cargo publish --dry-run --locked
 ```
 
 When a change affects benchmarks, the default journal capacity, or canbench targets, regenerate
