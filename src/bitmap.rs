@@ -845,11 +845,29 @@ mod tests {
     }
 
     #[cfg(journal_slots_ge_1024)]
-    fn fill_journal_for_checkpoint_failure(bs: &RoaringBitmap<FailOnGrowMemory>) {
+    fn fill_journal_for_checkpoint_failure(bs: &RoaringBitmap<FailOnGrowMemory>) -> u32 {
         const CONTAINER_STRIDE: u64 = 1 << 16;
+        let cap = crate::JOURNAL_CAP_SLOTS as u64;
+        let mut next_container = 0u64;
 
-        for slot in 0..(crate::JOURNAL_CAP_SLOTS as u64 - 1) {
-            bs.insert((slot * CONTAINER_STRIDE) as u32).unwrap();
+        loop {
+            while bs.journal_len.get() < cap - 1 {
+                let index = next_container * CONTAINER_STRIDE;
+                bs.insert(index as u32).unwrap();
+                next_container += 1;
+            }
+
+            let snapshot_len = bs.state.borrow().bitmap.serialized_size() as u64;
+            let snapshot_end = snapshot_base().checked_add(snapshot_len).unwrap();
+            let allocated_bytes = bs.memory.size() * crate::memory::WASM_PAGE_SIZE;
+            if snapshot_end > allocated_bytes {
+                let index = next_container * CONTAINER_STRIDE;
+                return index as u32;
+            }
+
+            let index = next_container * CONTAINER_STRIDE;
+            bs.insert(index as u32).unwrap();
+            next_container += 1;
         }
     }
 
@@ -1368,24 +1386,21 @@ mod tests {
     #[cfg(journal_slots_ge_1024)]
     #[test]
     fn mutation_error_does_not_apply_journaled_change() {
-        const CONTAINER_STRIDE: u64 = 1 << 16;
-        let requested_index = (crate::JOURNAL_CAP_SLOTS as u64 - 1) * CONTAINER_STRIDE;
-
         let memory = FailOnGrowMemory::new();
         let bs = RoaringBitmap::new(memory.clone()).unwrap();
-        fill_journal_for_checkpoint_failure(&bs);
+        let requested_index = fill_journal_for_checkpoint_failure(&bs);
         let len_before = bs.len();
         memory.fail_grows();
         assert!(matches!(
-            bs.insert(requested_index as u32),
+            bs.insert(requested_index),
             Err(BitmapError::GrowFailed(_))
         ));
         memory.allow_grows();
         assert_eq!(bs.len(), len_before);
-        assert!(!bs.contains(requested_index as u32));
+        assert!(!bs.contains(requested_index));
         let bs = reopen(bs.into_memory());
         assert_eq!(bs.len(), len_before);
-        assert!(!bs.contains(requested_index as u32));
+        assert!(!bs.contains(requested_index));
 
         let memory = FailOnGrowMemory::new();
         let bs = RoaringBitmap::new(memory.clone()).unwrap();

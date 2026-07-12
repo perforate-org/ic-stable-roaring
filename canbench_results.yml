@@ -2,25 +2,25 @@ benches:
   bench_roaring_checkpoint_after_full_journal:
     total:
       calls: 1
-      instructions: 180380
+      instructions: 571010
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_checkpoint:
         calls: 1
-        instructions: 179255
+        instructions: 569964
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_checkpoint_fixed_snapshot_65536:
     total:
       calls: 1
-      instructions: 178445
+      instructions: 168205
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_checkpoint_fixed_snapshot_65536:
         calls: 1
-        instructions: 177324
+        instructions: 167084
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_contains_1024:
@@ -62,7 +62,7 @@ benches:
   bench_roaring_insert_1024:
     total:
       calls: 1
-      instructions: 698257
+      instructions: 686017
       heap_increase: 0
       stable_memory_increase: 1
     scopes:
@@ -71,64 +71,64 @@ benches:
         instructions: 624243
         heap_increase: 0
         stable_memory_increase: 0
-  bench_roaring_reopen_after_full_journal:
-    total:
-      calls: 1
-      instructions: 51205
-      heap_increase: 0
-      stable_memory_increase: 0
-    scopes:
-      roaring_reopen:
-        calls: 1
-        instructions: 50173
-        heap_increase: 0
-        stable_memory_increase: 0
   bench_roaring_reopen_after_large_snapshot_65536:
     total:
       calls: 1
-      instructions: 1368064
+      instructions: 46058
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_reopen_large:
         calls: 1
-        instructions: 1367032
+        instructions: 45026
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_reopen_after_preemptive_checkpoint:
+    total:
+      calls: 1
+      instructions: 172072
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_reopen_after_checkpoint:
+        calls: 1
+        instructions: 171040
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_reopen_after_pure_journal_full:
     total:
       calls: 1
-      instructions: 15101
+      instructions: 8076630
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_reopen_pure_journal:
         calls: 1
-        instructions: 14065
+        instructions: 8075594
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_reopen_after_segmented_journal_full:
     total:
       calls: 1
-      instructions: 6562146
+      instructions: 3751284
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_reopen_segmented_journal:
         calls: 1
-        instructions: 6561110
+        instructions: 3750248
         heap_increase: 0
         stable_memory_increase: 0
-  bench_roaring_reopen_journal_at_capacity:
+  bench_roaring_reopen_journal_at_preemptive_limit:
     total:
       calls: 1
-      instructions: 50890
+      instructions: 3876138
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
-      roaring_reopen_journal_at_capacity:
+      roaring_reopen_journal_at_preemptive_limit:
         calls: 1
-        instructions: 49858
+        instructions: 3875106
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_reopen_journal_fixed_pending_1024:
@@ -141,18 +141,6 @@ benches:
       roaring_reopen_journal_fixed_1024:
         calls: 1
         instructions: 874222
-        heap_increase: 0
-        stable_memory_increase: 0
-  bench_roaring_reopen_journal_fixed_pending_4096:
-    total:
-      calls: 1
-      instructions: 3882280
-      heap_increase: 0
-      stable_memory_increase: 0
-    scopes:
-      roaring_reopen_journal_fixed_4096:
-        calls: 1
-        instructions: 3881248
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_reopen_journal_prefix_small:
@@ -170,37 +158,37 @@ benches:
   bench_roaring_reopen_journal_three_quarters:
     total:
       calls: 1
-      instructions: 4148772
+      instructions: 2862345
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_reopen_journal_three_quarters:
         calls: 1
-        instructions: 4147740
+        instructions: 2861313
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_sequential_inserts_fixed_32768:
     total:
       calls: 1
-      instructions: 13484120
+      instructions: 14319703
       heap_increase: 0
       stable_memory_increase: 1
     scopes:
       roaring_seq_inserts_fixed_32768:
         calls: 1
-        instructions: 13410272
+        instructions: 14258095
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_sequential_inserts_sustained_journal:
     total:
       calls: 1
-      instructions: 19567763
+      instructions: 14319703
       heap_increase: 0
       stable_memory_increase: 1
     scopes:
       roaring_seq_inserts_journal:
         calls: 1
-        instructions: 19493915
+        instructions: 14258095
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_truncate_2048_to_1024:

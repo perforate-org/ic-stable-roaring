@@ -4,7 +4,7 @@
 //! dimension (total writes, pending journal length, or snapshot size) **constant** regardless of
 //! [`crate::JOURNAL_CAP_SLOTS`].
 //! Fixed-pending **`reopen`** benches are **`cfg`‑gated in `build.rs`** (`journal_slots_gt_1024`,
-//! `journal_slots_ge_4096`) when the crate is built without enough journal capacity.
+//! `journal_slots_gt_4096`) when the crate is built without enough journal capacity.
 
 use std::hint::black_box;
 
@@ -17,7 +17,6 @@ mod wipe;
 const INSERT_COUNT: u64 = 1_024;
 const TRUNCATE_FROM: u64 = 2_048;
 const TRUNCATE_TO: u64 = 1_024;
-const REOPEN_COUNT: u64 = crate::JOURNAL_CAP_SLOTS as u64;
 const LARGE_SNAPSHOT_BITS: u64 = 65_536;
 const FIXED_CHECKPOINT_SNAPSHOT_BITS: u64 = 65_536;
 const CONTAINS_BITMAP_BITS: u64 = 65_536;
@@ -28,8 +27,16 @@ const CONTAINS_SPREAD_INCREMENT: u64 = 0xB529;
 const LARGE_TRUNCATE_FROM: u64 = 65_536;
 const LARGE_TRUNCATE_TO: u64 = 32_768;
 const JOURNAL_CAP_FILL: u64 = crate::JOURNAL_CAP_SLOTS as u64;
+/// Largest journal prefix reachable through the public API before it checkpoints.
+///
+/// Capacities above one checkpoint before appending the final slot. Capacity one is special: every
+/// append checkpoints first, then occupies its sole slot.
+const JOURNAL_PREEMPTIVE_LIMIT: u64 = if JOURNAL_CAP_FILL == 1 {
+    1
+} else {
+    JOURNAL_CAP_FILL - 1
+};
 const REPLAY_BLOCK: u64 = JOURNAL_CAP_FILL / 4;
-const REPLAY_HALF: u64 = JOURNAL_CAP_FILL / 2;
 
 /// Replay prefix length (floor of ~75% of journal capacity); every positive capacity is supported.
 const REPLAY_THREE_QUARTERS: u64 = crate::JOURNAL_CAP_SLOTS as u64 * 3 / 4;
@@ -46,7 +53,7 @@ const FIXED_TOTAL_SEQUENTIAL_INSERTS: u64 = 32_768;
 #[cfg(journal_slots_gt_1024)]
 const FIXED_JOURNAL_PENDING_1024: u64 = 1_024;
 
-#[cfg(journal_slots_ge_4096)]
+#[cfg(journal_slots_gt_4096)]
 const FIXED_JOURNAL_PENDING_4096: u64 = 4_096;
 
 fn make_bitset() -> StableRoaringBitmap<DefaultMemoryImpl> {
@@ -84,10 +91,11 @@ fn bench_reopen_case(
 }
 
 fn setup_pure_replay_journal(bitset: &StableRoaringBitmap<DefaultMemoryImpl>) {
-    for index in 0..REPLAY_HALF {
+    let inserted = JOURNAL_PREEMPTIVE_LIMIT.div_ceil(2);
+    for index in 0..inserted {
         bitset.insert(index as u32).expect("insert");
     }
-    for index in 0..REPLAY_HALF {
+    for index in 0..(JOURNAL_PREEMPTIVE_LIMIT - inserted) {
         bitset.clear(index as u32).expect("clear");
     }
 }
@@ -191,15 +199,14 @@ fn bench_roaring_truncate_2048_to_1024() -> canbench_rs::BenchResult {
 }
 
 #[bench(raw)]
-fn bench_roaring_reopen_after_full_journal() -> canbench_rs::BenchResult {
+fn bench_roaring_reopen_after_preemptive_checkpoint() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();
     let bitset = make_bitset();
-    populate(&bitset, REOPEN_COUNT);
-    bitset.insert(REOPEN_COUNT as u32).expect("insert");
+    populate(&bitset, JOURNAL_CAP_FILL);
     canbench_rs::bench_fn(|| {
-        let _p = canbench_rs::bench_scope("roaring_reopen");
+        let _p = canbench_rs::bench_scope("roaring_reopen_after_checkpoint");
         let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
-        black_box(reopened.contains(black_box(REOPEN_COUNT as u32)));
+        black_box(reopened.contains(black_box((JOURNAL_CAP_FILL - 1) as u32)));
     })
 }
 
@@ -292,17 +299,17 @@ fn bench_roaring_reopen_after_large_snapshot_65536() -> canbench_rs::BenchResult
     })
 }
 
-/// Reopen while the journal holds the maximum number of pending records (capacity exactly used, no
-/// prior checkpoint in the measured step). Journal scan + replay cost scales with `JOURNAL_CAP_SLOTS`.
+/// Reopen while the journal holds the largest pending prefix the public API can produce before a
+/// preemptive checkpoint. Journal scan + replay cost scales with `JOURNAL_CAP_SLOTS`.
 #[bench(raw)]
-fn bench_roaring_reopen_journal_at_capacity() -> canbench_rs::BenchResult {
+fn bench_roaring_reopen_journal_at_preemptive_limit() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();
     let bitset = make_bitset();
-    populate(&bitset, JOURNAL_CAP_FILL);
+    populate(&bitset, JOURNAL_PREEMPTIVE_LIMIT);
     canbench_rs::bench_fn(|| {
-        let _p = canbench_rs::bench_scope("roaring_reopen_journal_at_capacity");
+        let _p = canbench_rs::bench_scope("roaring_reopen_journal_at_preemptive_limit");
         let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
-        let last = black_box((JOURNAL_CAP_FILL.saturating_sub(1)) as u32);
+        let last = black_box((JOURNAL_PREEMPTIVE_LIMIT - 1) as u32);
         black_box((reopened.len(), reopened.contains(last)));
     })
 }
@@ -393,8 +400,9 @@ fn bench_roaring_reopen_journal_fixed_pending_1024() -> canbench_rs::BenchResult
 
 /// Reopen with **4096** pending inserts (indices `0..4095`).
 ///
-/// Compiled only when **`JOURNAL_CAP_SLOTS ≥ 4096`** (`build.rs` emits `journal_slots_ge_4096`).
-#[cfg(journal_slots_ge_4096)]
+/// Compiled only when **`JOURNAL_CAP_SLOTS > 4096`** so all records remain pending without a
+/// preemptive checkpoint (`build.rs` emits `journal_slots_gt_4096`).
+#[cfg(journal_slots_gt_4096)]
 #[bench(raw)]
 fn bench_roaring_reopen_journal_fixed_pending_4096() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();

@@ -1,5 +1,5 @@
 # Optional compile-time knobs (forwarded automatically if set in your shell):
-#   JOURNAL_CAP_SLOTS (defaults to 6144 here and in build.rs)
+#   JOURNAL_CAP_SLOTS (defaults to 4096 here and in build.rs)
 #   JOURNAL_READ_CHUNK_TARGET, JOURNAL_READ_CHUNK_MAX
-build_cmd: "bash -eo pipefail -c 'export JOURNAL_CAP_SLOTS=\"${JOURNAL_CAP_SLOTS:-6144}\"; cargo build --release --locked --target wasm32-unknown-unknown --features canbench'"
+build_cmd: "bash -eo pipefail -c 'export JOURNAL_CAP_SLOTS=\"${JOURNAL_CAP_SLOTS:-4096}\"; cargo build --release --locked --target wasm32-unknown-unknown --features canbench'"
 wasm_path: "target/wasm32-unknown-unknown/release/ic_stable_roaring.wasm"

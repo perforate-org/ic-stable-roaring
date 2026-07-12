@@ -1,11 +1,11 @@
 //! Writes **`journal_layout.rs`** under Cargo's `OUT_DIR`.
 //!
 //! Optional env vars (compile time):
-//! - **`JOURNAL_CAP_SLOTS`** — journal slot capacity (default **`6144`**; any positive **`usize`**
+//! - **`JOURNAL_CAP_SLOTS`** — journal slot capacity (default **`4096`**; any positive **`usize`**
 //!   whose fixed layout addresses fit in `u64`).
-//!   The default (**6144**) balances **steady mutation** workloads (fewer checkpoints than **`4096`**) against
-//!   a smaller stable journal than **`8192`** and somewhat lighter long-journal replay — see README **Choosing
-//!   `JOURNAL_CAP_SLOTS`**. Larger or smaller caps are compile-time overrides via this env var.
+//!   The default keeps the stable layout compact and bounds worst-case journal replay. Increase it
+//!   only for write-heavy workloads that can trade slower long-journal reopen for fewer checkpoints.
+//!   Larger or smaller caps are compile-time overrides via this env var.
 //!   This value is stored in the stable-memory header; journal size and the rest of the layout derive
 //!   from it, so **Wasm modules compiled with different caps are not interchangeable** on the same
 //!   backing memory unless you migrate externally (see the `ic_stable_roaring` crate README and crate
@@ -90,7 +90,7 @@ fn main() {
     let out_dir = std::env::var_os("OUT_DIR").expect("OUT_DIR must be set by Cargo");
     let out_path = std::path::Path::new(&out_dir).join("journal_layout.rs");
 
-    let slots_str = std::env::var("JOURNAL_CAP_SLOTS").unwrap_or_else(|_| "6144".to_string());
+    let slots_str = std::env::var("JOURNAL_CAP_SLOTS").unwrap_or_else(|_| "4096".to_string());
     let slots: usize = slots_str.parse().unwrap_or_else(|err| {
         panic!("JOURNAL_CAP_SLOTS={slots_str:?} is not a valid usize: {err}");
     });
@@ -163,15 +163,15 @@ fn main() {
     // Gate `#[cfg]` in `bench` so fixed-journal benchmarks are omitted when compile-time caps are too small.
     println!("cargo:rustc-check-cfg=cfg(journal_slots_ge_1024)");
     println!("cargo:rustc-check-cfg=cfg(journal_slots_gt_1024)");
-    println!("cargo:rustc-check-cfg=cfg(journal_slots_ge_4096)");
+    println!("cargo:rustc-check-cfg=cfg(journal_slots_gt_4096)");
     if slots >= 1024 {
         println!("cargo:rustc-cfg=journal_slots_ge_1024");
     }
     if slots > 1024 {
         println!("cargo:rustc-cfg=journal_slots_gt_1024");
     }
-    if slots >= 4096 {
-        println!("cargo:rustc-cfg=journal_slots_ge_4096");
+    if slots > 4096 {
+        println!("cargo:rustc-cfg=journal_slots_gt_4096");
     }
 
     println!("cargo:rerun-if-env-changed=JOURNAL_CAP_SLOTS");

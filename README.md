@@ -24,7 +24,7 @@ Complexity and edge cases (for example checkpoint cost **Θ(S)** before the jour
 
 Mutations return **`Result<..., BitmapError>`** (`LimitsExceeded`, `GrowFailed`, snapshot **I/O**). Lengths above **`JOURNAL_LEN_MAX`** are reported as `LimitsExceeded`, not panics.
 
-The on-disk journal records **logical state changes**, not every redundant `set` call—do not treat it as a verbatim audit log. Journal capacity is fixed when the crate is built (**`JOURNAL_CAP_SLOTS`**, default `6144`). At compile time, set **`JOURNAL_CAP_SLOTS`** to a positive **`usize`** whose fixed layout offsets fit in `u64`; invalid extreme values fail the build. **`JOURNAL_READ_CHUNK_BYTES`** is chosen in **`build.rs`** as the **largest divisor** of **`JOURNAL_CAP_SLOTS * 5`** that is a multiple of **`5`** and does not exceed **`floor5(min(JOURNAL_CAP_SLOTS * 5, JOURNAL_READ_CHUNK_TARGET, JOURNAL_READ_CHUNK_MAX))`** (defaults: target **`5120`**, max **`32768`**). `init` replays the contiguous nonzero prefix and stops at the first all-zero record. It does not scan or reject nonzero bytes later in the unused journal region; as with `stable-structures`, callers must keep this stable-memory region isolated and valid. The chunk target controls the granularity of replay reads: recovery reads through the chunk containing the first empty record, rather than the full fixed region. **`JOURNAL_READ_CHUNK_MAX`** may lower the limit but cannot exceed the non-overridable **32768-byte** Wasm stack / buffer ceiling. Set **`JOURNAL_READ_CHUNK_TARGET`** high (up to the effective max) if you intentionally want fewer, larger reads when the journal is dense. **`JOURNAL_REGION_BYTES`** is **`JOURNAL_CAP_SLOTS * 5`**. Smaller journals mean checkpoints happen more often under heavy writes.
+The on-disk journal records **logical state changes**, not every redundant `set` call—do not treat it as a verbatim audit log. Journal capacity is fixed when the crate is built (**`JOURNAL_CAP_SLOTS`**, default **`4096`**). At compile time, set **`JOURNAL_CAP_SLOTS`** to a positive **`usize`** whose fixed layout offsets fit in `u64`; invalid extreme values fail the build. **`JOURNAL_READ_CHUNK_BYTES`** is chosen in **`build.rs`** as the largest valid divisor of the journal region under **`JOURNAL_READ_CHUNK_TARGET`** (default **`5120`**) and **`JOURNAL_READ_CHUNK_MAX`** (at most **`32768`**). `init` replays the contiguous nonzero prefix and stops at the first all-zero record. It does not scan or reject nonzero bytes later in the unused journal region; as with `stable-structures`, callers must keep this stable-memory region isolated and valid. **`JOURNAL_REGION_BYTES`** is **`JOURNAL_CAP_SLOTS * 5`**.
 
 ### `JOURNAL_CAP_SLOTS` and stable-memory compatibility
 
@@ -36,30 +36,23 @@ To adopt a different capacity on a live canister, plan an explicit migration (fo
 
 ### Choosing `JOURNAL_CAP_SLOTS` (default and tuning)
 
-There is **no single optimal** slot count for every canister: behavior depends on how often you **mutate** the bitmap versus how often you **cold-open** it (for example after `init` on upgrade or reload) and on how full the journal tends to be before a checkpoint.
-
-Rough guide:
-
-- **Larger capacity** (for example **8192**) — Under steady **writes**, the journal approaches its final slot less often, so **checkpoints occur less frequently** (each checkpoint is costly in snapshot size **S**). You pay a **larger fixed journal region** in stable memory (**`JOURNAL_REGION_BYTES`**) and, in paths that replay a **long** journal, **reopen / replay work can grow** with how much is recorded.
-- **Smaller capacity** (for example **4096**) — **Smaller** stable layout and somewhat **lower worst-case reopen cost** when large journal backlogs matter, at the price of **more frequent** checkpoints when mutations keep the journal busy.
-
-The **crate default** (**6144**) is a **middle ground** between **`4096`** and **`8192`**: enough headroom to reduce checkpoint pressure versus **`4096`**, with a **`JOURNAL_REGION_BYTES`** of **`6144 × 5`** (30 KiB) instead of **`8192 × 5`** so long-journal **`init`/replay** stays cheaper than under the larger cap under similar backlog. Tune **down** (**4096**) for minimal stable footprint and reopen-heavy patterns, **up** (**8192** or beyond, still `usize`-limited) under very heavy steady writes—the trade-off stays workload-dependent (**`build.rs`** env vars). Migrating after launch always requires **layout-compatible** migration (see above).
+The default **4096** uses a 20 KiB journal and balances fixed-workload writes against bounded worst-case reopen. Raise the capacity only for a write-heavy workload that can accept a larger stable region and slower replay of a long pending journal. Measure the target workload before overriding it.
 
 ### Recovery integrity boundary
 
 `init` intentionally trusts a valid, isolated stable-memory region and stops replay at the first empty journal slot. This matches `stable-structures` production initialization, which validates headers and reads reachable data rather than scanning unused allocation space. A committed-length-header experiment also avoided the tail scan, but its extra stable header write regressed `insert_1024` by about 9% and sustained inserts by about 13–14%, so it was rejected. If an application needs to detect arbitrary out-of-band corruption of the unused tail, it must provide an explicit offline integrity audit; normal recovery does not pay that cost. Measure capacity trade-offs in the target PocketIC environment with:
 
 ```sh
-JOURNAL_CAP_SWEEP_SLOTS='1024 2048 4096 6144' \
+JOURNAL_CAP_SWEEP_SLOTS='1024 2048 4096 5120 6144 8192' \
   ./scripts/sweep_journal_cap_canbench.sh \
-  bench_roaring_reopen_journal_prefix_small \
+  bench_roaring_reopen_journal_at_preemptive_limit \
   bench_roaring_reopen_journal_fixed_pending_1024 \
-  bench_roaring_checkpoint_after_full_journal \
+  bench_roaring_reopen_journal_fixed_pending_4096 \
   bench_roaring_checkpoint_fixed_snapshot_65536 \
   bench_roaring_sequential_inserts_fixed_32768
 ```
 
-`bench_roaring_reopen_journal_fixed_pending_1024` is intentionally omitted when capacity is exactly `1024`: the final pending record would trigger the checkpoint being avoided by that benchmark.
+The fixed-pending benchmarks are omitted when the capacity cannot hold the named number of records before its preemptive checkpoint.
 
 ### `roaring` dependency compatibility
 
