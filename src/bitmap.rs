@@ -746,6 +746,11 @@ impl<M: Memory> RoaringBitmap<M> {
         self.journal_len.set(0);
         Ok(())
     }
+
+    #[cfg(feature = "canbench")]
+    pub(crate) fn checkpoint_for_bench(&self) -> Result<(), BitmapError> {
+        self.checkpoint()
+    }
 }
 
 #[inline]

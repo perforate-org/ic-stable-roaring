@@ -11,6 +11,18 @@ benches:
         instructions: 586056
         heap_increase: 0
         stable_memory_increase: 0
+  bench_roaring_checkpoint_direct:
+    total:
+      calls: 1
+      instructions: 586461
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_checkpoint_direct:
+        calls: 1
+        instructions: 585406
+        heap_increase: 0
+        stable_memory_increase: 0
   bench_roaring_checkpoint_fixed_snapshot_65536:
     total:
       calls: 1

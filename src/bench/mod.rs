@@ -306,6 +306,18 @@ fn bench_roaring_checkpoint_after_full_journal() -> canbench_rs::BenchResult {
     })
 }
 
+#[bench(raw)]
+fn bench_roaring_checkpoint_direct() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, JOURNAL_CAP_FILL.saturating_sub(1));
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_checkpoint_direct");
+        bitset.checkpoint_for_bench().expect("checkpoint");
+        black_box(bitset.len());
+    })
+}
+
 /// Checkpoint a fixed-size snapshot after filling the journal boundary with reversible mutations.
 /// Unlike `bench_roaring_checkpoint_after_full_journal`, the snapshot size does not vary with
 /// `JOURNAL_CAP_SLOTS`, so this isolates capacity's effect on checkpoint scheduling and clearing.
