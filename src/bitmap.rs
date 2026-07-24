@@ -244,16 +244,6 @@ impl Header {
         write_u64(memory, SNAPSHOT_LEN_OFFSET, self.snapshot_len_bytes)?;
         Ok(())
     }
-
-    fn encode_prefix(&self) -> [u8; 28] {
-        let mut bytes = [0u8; 28];
-        bytes[0..3].copy_from_slice(&self.magic);
-        bytes[3] = self.version;
-        bytes[4..12].copy_from_slice(&self.len_bits.to_le_bytes());
-        bytes[12..20].copy_from_slice(&self.journal_slots.to_le_bytes());
-        bytes[20..28].copy_from_slice(&self.snapshot_len_bytes.to_le_bytes());
-        bytes
-    }
 }
 
 fn read_header<M: Memory>(memory: &M) -> Result<Header, InitError> {
@@ -279,15 +269,6 @@ fn write_header<M: Memory>(
     snapshot_len_bytes: u64,
 ) -> Result<(), crate::GrowFailed> {
     Header::new(len_bits, snapshot_len_bytes).write(memory)
-}
-
-fn write_checkpoint_header<M: Memory>(
-    memory: &M,
-    len_bits: u64,
-    snapshot_len_bytes: u64,
-) -> Result<(), crate::GrowFailed> {
-    let header = Header::new(len_bits, snapshot_len_bytes).encode_prefix();
-    safe_write(memory, MAGIC_OFFSET, &header)
 }
 
 /// Stable roaring bitmap with a heap mirror and a durable journal.
@@ -756,12 +737,7 @@ impl<M: Memory> RoaringBitmap<M> {
             st.bitmap.serialize_into(&mut writer)?;
         }
 
-        write_checkpoint_header(&self.memory, len_bits, snapshot_len_bytes)?;
-        write_zero_bytes(
-            &self.memory,
-            journal_offset(),
-            self.journal_len.get() * JOURNAL_RECORD_SIZE,
-        )?;
+        write_header(&self.memory, len_bits, snapshot_len_bytes)?;
         write_zero_bytes(
             &self.memory,
             journal_offset(),

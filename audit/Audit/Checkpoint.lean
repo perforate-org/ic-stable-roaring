@@ -37,7 +37,11 @@ inductive Stage
   | grown
   | snapshotWriting (observed : Option Bitmap.DecodedSnapshot)
   | snapshotWritten
-  | headerWritten
+  | magicWritten
+  | versionWritten
+  | lengthWritten
+  | capacityWritten
+  | snapshotLengthWritten
   | journalCleared
   deriving DecidableEq
 
@@ -90,7 +94,24 @@ avoids a chain of nearly identical whole-image updates. Mirrors `src/bitmap.rs` 
 def headerAt (before : Bitmap.Header) (state : Abstract.LogicalBitmap)
     (encodedLen : Nat) : Stage → Bitmap.Header
   | .before | .grown | .snapshotWriting _ | .snapshotWritten => before
-  | .headerWritten | .journalCleared => targetHeader state encodedLen
+  | .magicWritten => { before with magic := Bitmap.MAGIC }
+  | .versionWritten => {
+      before with magic := Bitmap.MAGIC, version := Bitmap.VERSION
+    }
+  | .lengthWritten => {
+      before with
+      magic := Bitmap.MAGIC
+      version := Bitmap.VERSION
+      len_bits := state.len_bits
+    }
+  | .capacityWritten => {
+      before with
+      magic := Bitmap.MAGIC
+      version := Bitmap.VERSION
+      len_bits := state.len_bits
+      journal_slots := Bitmap.JOURNAL_CAP_SLOTS
+    }
+  | .snapshotLengthWritten | .journalCleared => targetHeader state encodedLen
 
 /-- Durable image at one checkpoint boundary. The header cases mirror the five separate writes in
 `Header::write`; journal clearing is one atomic write for the audited default capacity. -/
