@@ -57,7 +57,7 @@ jobs:
           set -euo pipefail
           mkdir -p release
           cargo +1.90.0 install cargo-cyclonedx --version 0.5.9 --locked
-          cargo +1.90.0 cyclonedx --all-features --format json --spec-version 1.5 --override-filename bom.json
+          cargo +1.90.0 cyclonedx --all-features --format json --spec-version 1.5 --override-filename bom
           mv bom.json release/sbom.json
 
       - name: Generate package checksum
