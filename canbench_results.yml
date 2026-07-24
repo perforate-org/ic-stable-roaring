@@ -23,6 +23,18 @@ benches:
         instructions: 585406
         heap_increase: 0
         stable_memory_increase: 0
+  bench_roaring_checkpoint_fixed_direct_65536:
+    total:
+      calls: 1
+      instructions: 168936
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_checkpoint_fixed_direct_65536:
+        calls: 1
+        instructions: 167784
+        heap_increase: 0
+        stable_memory_increase: 0
   bench_roaring_checkpoint_fixed_snapshot_65536:
     total:
       calls: 1
@@ -86,7 +98,7 @@ benches:
   bench_roaring_insert_1024:
     total:
       calls: 1
-      instructions: 663266
+      instructions: 663208
       heap_increase: 0
       stable_memory_increase: 1
     scopes:
@@ -206,7 +218,7 @@ benches:
   bench_roaring_sequential_inserts_fixed_32768:
     total:
       calls: 1
-      instructions: 13656755
+      instructions: 13656697
       heap_increase: 0
       stable_memory_increase: 1
     scopes:
@@ -218,7 +230,7 @@ benches:
   bench_roaring_sequential_inserts_sustained_journal:
     total:
       calls: 1
-      instructions: 13656755
+      instructions: 13656697
       heap_increase: 0
       stable_memory_increase: 1
     scopes:

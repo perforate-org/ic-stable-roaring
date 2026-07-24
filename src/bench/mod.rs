@@ -350,6 +350,31 @@ fn bench_roaring_checkpoint_fixed_snapshot_65536() -> canbench_rs::BenchResult {
 }
 
 #[bench(raw)]
+fn bench_roaring_checkpoint_fixed_direct_65536() -> canbench_rs::BenchResult {
+    if crate::JOURNAL_CAP_SLOTS == 1 {
+        return canbench_rs::BenchResult::default();
+    }
+
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, FIXED_CHECKPOINT_SNAPSHOT_BITS);
+    let pending = pending_records_after_appends(FIXED_CHECKPOINT_SNAPSHOT_BITS);
+    let mut bit_zero_is_set = true;
+    for _ in 0..(crate::JOURNAL_CAP_SLOTS as u64 - 1 - pending) {
+        bit_zero_is_set = !bit_zero_is_set;
+        bitset
+            .set(0, bit_zero_is_set)
+            .expect("reversible journal fill");
+    }
+
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_checkpoint_fixed_direct_65536");
+        bitset.checkpoint_for_bench().expect("checkpoint");
+        black_box(bitset.len());
+    })
+}
+
+#[bench(raw)]
 fn bench_roaring_reopen_after_large_snapshot_65536() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();
     let bitset = make_bitset();
