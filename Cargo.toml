@@ -1,6 +1,6 @@
 [package]
 name = "ic-stable-roaring"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Inomoto Yota <yota@perforate.org>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
