@@ -21,10 +21,16 @@ cargo fmt --check
 cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 scripts/test_layout_matrix.sh
+audit/scripts/check-journal-model.sh
+(cd audit && lake build)
+! rg -n '\b(sorry|axiom)\b|UNDERSPECIFIED|True := by|: True' audit --glob '*.lean'
 ```
 
 The [`fuzz/`](./fuzz/README.md) workspace contains longer-running, manual checks and reproduction
-instructions.
+instructions. The Lean audit uses the pinned toolchain in [`audit/lean-toolchain`](./audit/lean-toolchain)
+and must remain free of proof placeholders and vacuous security claims.
+Changes to `src/journal.rs` must also regenerate the pinned Aeneas model as documented in
+[`audit/README.md`](./audit/README.md).
 
 ## Stable-memory changes
 

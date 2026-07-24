@@ -15,6 +15,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  lean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check generated journal model freshness
+        run: audit/scripts/check-journal-model.sh
+
+      - name: Build Lean audit
+        uses: leanprover/lean-action@38fbc41a8c28c4cbaec22d7f7de508ec2e7c0dd9 # v1.5.0
+        with:
+          lake-package-directory: audit
+          auto-config: false
+          build: true
+          test: false
+          lint: false
+
+      - name: Check Lean proof hygiene
+        shell: bash
+        run: |
+          if rg -n '\b(sorry|axiom)\b|UNDERSPECIFIED|True := by|: True' audit --glob '*.lean'; then
+            echo "Lean audit contains a prohibited proof placeholder or vacuous claim"
+            exit 1
+          fi
+
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
