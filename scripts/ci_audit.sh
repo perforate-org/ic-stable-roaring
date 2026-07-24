@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+# Git hooks may run with a minimal PATH (for example when invoked by an IDE or
+# an SSH session), so include the standard Rust and Lean tool locations.
+export PATH="${HOME}/.cargo/bin:${HOME}/.elan/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 

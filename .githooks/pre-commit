@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+export PATH="${HOME}/.cargo/bin:${HOME}/.elan/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
 git diff --cached --check
 cargo +1.90.0 fmt --check
 if rg -n '\b(sorry|axiom)\b|UNDERSPECIFIED|True := by|: True' audit --glob '*.lean'; then
