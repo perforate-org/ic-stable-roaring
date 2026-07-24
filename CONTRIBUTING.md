@@ -26,6 +26,22 @@ audit/scripts/check-journal-model.sh
 ! rg -n '\b(sorry|axiom)\b|UNDERSPECIFIED|True := by|: True' audit --glob '*.lean'
 ```
 
+The same Rust, layout, journal-model, and Lean checks used by CI can be run locally with:
+
+```sh
+scripts/ci_audit.sh
+```
+
+To enable automatic local checks before commits and pushes:
+
+```sh
+scripts/install-git-hooks.sh
+```
+
+The pre-commit hook checks staged whitespace, Rust formatting, and Lean proof hygiene. The pre-push
+hook runs the full `scripts/ci_audit.sh` audit. Use Git's standard `--no-verify` only for emergencies;
+remote CI remains authoritative.
+
 The [`fuzz/`](./fuzz/README.md) workspace contains longer-running, manual checks and reproduction
 instructions. The Lean audit uses the pinned toolchain in [`audit/lean-toolchain`](./audit/lean-toolchain)
 and must remain free of proof placeholders and vacuous security claims.

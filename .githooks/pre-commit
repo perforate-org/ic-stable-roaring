@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+git diff --cached --check
+cargo +1.90.0 fmt --check
+if rg -n '\b(sorry|axiom)\b|UNDERSPECIFIED|True := by|: True' audit --glob '*.lean'; then
+    echo "Lean audit contains a prohibited proof placeholder or vacuous claim" >&2
+    exit 1
+fi
