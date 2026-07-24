@@ -279,7 +279,7 @@ def journal.JournalRecord.Insts.CoreCmpEq : core.cmp.Eq journal.JournalRecord
 }
 
 /-- [ic_stable_roaring_journal_model::journal::{ic_stable_roaring_journal_model::journal::JournalRecord}::from_raw]:
-    Source: '../../src/journal.rs', lines 55:4-58:5 -/
+    Source: '../../src/journal.rs', lines 59:4-62:5 -/
 def journal.JournalRecord.from_raw
   (raw1 : Std.U64) : Result journal.JournalRecord := do
   let i ← journal.RECORD_RAW_MASK
@@ -293,7 +293,7 @@ def journal.JournalRecord.from_raw
   ok (Array.make 5#usize [ i2, i3, i4, i5, i6 ])
 
 /-- [ic_stable_roaring_journal_model::journal::{ic_stable_roaring_journal_model::journal::JournalRecord}::pack_fields]:
-    Source: '../../src/journal.rs', lines 47:4-53:5 -/
+    Source: '../../src/journal.rs', lines 50:4-56:5 -/
 def journal.JournalRecord.pack_fields
   (tag : journal.JournalTag) (value : Bool) (payload_lo : Std.U32)
   (len_hi : Std.U32) :
@@ -316,7 +316,7 @@ def journal.JournalRecord.pack_fields
   journal.JournalRecord.from_raw raw1
 
 /-- [ic_stable_roaring_journal_model::journal::{ic_stable_roaring_journal_model::journal::JournalRecord}::set_len]:
-    Source: '../../src/journal.rs', lines 33:4-41:5 -/
+    Source: '../../src/journal.rs', lines 34:4-42:5 -/
 def journal.JournalRecord.set_len
   (len : Std.U64) : Result journal.JournalRecord := do
   let i ← journal.LEN_MAX
@@ -329,13 +329,13 @@ def journal.JournalRecord.set_len
     len_hi
 
 /-- [ic_stable_roaring_journal_model::journal::{ic_stable_roaring_journal_model::journal::JournalRecord}::set_bit]:
-    Source: '../../src/journal.rs', lines 43:4-45:5 -/
+    Source: '../../src/journal.rs', lines 45:4-47:5 -/
 def journal.JournalRecord.set_bit
   (index : Std.U32) (value : Bool) : Result journal.JournalRecord := do
   journal.JournalRecord.pack_fields journal.JournalTag.SetBit value index 0#u32
 
 /-- [ic_stable_roaring_journal_model::journal::{ic_stable_roaring_journal_model::journal::JournalRecord}::raw]:
-    Source: '../../src/journal.rs', lines 60:4-64:5 -/
+    Source: '../../src/journal.rs', lines 65:4-69:5 -/
 def journal.JournalRecord.raw
   (self : journal.JournalRecord) : Result Std.U64 := do
   let i ← Array.index_usize self 0#usize
@@ -347,7 +347,7 @@ def journal.JournalRecord.raw
     (Array.make 8#usize [ i, i1, i2, i3, i4, 0#u8, 0#u8, 0#u8 ]))
 
 /-- [ic_stable_roaring_journal_model::journal::{ic_stable_roaring_journal_model::journal::JournalRecord}::unpack]:
-    Source: '../../src/journal.rs', lines 66:4-93:5 -/
+    Source: '../../src/journal.rs', lines 72:4-99:5 -/
 def journal.JournalRecord.unpack
   (self : journal.JournalRecord) :
   Result (core.result.Result (journal.JournalTag × Bool × Std.U64)

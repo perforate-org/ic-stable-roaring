@@ -1356,6 +1356,14 @@ mod tests {
 
     #[test]
     fn checkpoint_cross_container_splice_recovers_third_state() {
+        // With a single journal slot, the second mutation checkpoints before this
+        // streaming checkpoint begins, so the cross-container splice boundary
+        // exercised below does not exist. `capacity_one_mutation_avoids_double_checkpoint`
+        // covers the dedicated capacity-one behavior.
+        if crate::JOURNAL_CAP_SLOTS == 1 {
+            return;
+        }
+
         let second_key = 1u32 << 16;
         let seed = RoaringHeap::from_iter([1, 2, second_key | 10, second_key | 20]);
         let trace = checkpoint_trace(seed, u64::from(second_key | 20) + 1, |bs| {
