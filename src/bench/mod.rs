@@ -389,6 +389,19 @@ fn bench_roaring_reopen_after_large_snapshot_65536() -> canbench_rs::BenchResult
     })
 }
 
+#[bench(raw)]
+fn bench_roaring_reopen_snapshot_only_65536() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, LARGE_SNAPSHOT_BITS);
+    bitset.checkpoint_for_bench().expect("checkpoint snapshot");
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_reopen_snapshot_only_65536");
+        let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
+        black_box((reopened.len(), reopened.contains(black_box(0u32))));
+    })
+}
+
 /// Reopen while the journal holds the largest pending prefix the public API can produce before a
 /// preemptive checkpoint. Journal scan + replay cost scales with `JOURNAL_CAP_SLOTS`.
 #[bench(raw)]
