@@ -142,6 +142,42 @@ fn bench_roaring_insert_1024() -> canbench_rs::BenchResult {
     })
 }
 
+/// Measure one journal append and one heap mutation after setup has been excluded from the scope.
+#[bench(raw)]
+fn bench_roaring_insert_single_append() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, INSERT_COUNT - 1);
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_insert_single_append");
+        bitset
+            .insert(black_box((INSERT_COUNT - 1) as u32))
+            .expect("insert");
+        black_box(bitset.len());
+    })
+}
+
+/// Repeatedly toggle one bit to keep Roaring container shape stable while exercising journaling.
+#[bench(raw)]
+fn bench_roaring_set_toggle_journal() -> canbench_rs::BenchResult {
+    if JOURNAL_PREEMPTIVE_LIMIT == 0 {
+        return canbench_rs::BenchResult::default();
+    }
+
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    bitset.set(0, false).expect("initialize toggle bit");
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_set_toggle_journal");
+        let mut value = false;
+        for _ in 0..JOURNAL_PREEMPTIVE_LIMIT {
+            value = !value;
+            bitset.set(0, black_box(value)).expect("toggle bit");
+        }
+        black_box((bitset.len(), value));
+    })
+}
+
 #[bench(raw)]
 fn bench_roaring_contains_1024() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();

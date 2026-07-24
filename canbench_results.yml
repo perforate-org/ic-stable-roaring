@@ -74,13 +74,25 @@ benches:
   bench_roaring_insert_1024:
     total:
       calls: 1
-      instructions: 714408
+      instructions: 714466
       heap_increase: 0
       stable_memory_increase: 1
     scopes:
       roaring_insert:
         calls: 1
         instructions: 652520
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_insert_single_append:
+    total:
+      calls: 1
+      instructions: 2152
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_insert_single_append:
+        calls: 1
+        instructions: 1097
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_reopen_after_large_snapshot_65536:
@@ -182,7 +194,7 @@ benches:
   bench_roaring_sequential_inserts_fixed_32768:
     total:
       calls: 1
-      instructions: 15295097
+      instructions: 15295155
       heap_increase: 0
       stable_memory_increase: 1
     scopes:
@@ -194,13 +206,25 @@ benches:
   bench_roaring_sequential_inserts_sustained_journal:
     total:
       calls: 1
-      instructions: 15295097
+      instructions: 15295155
       heap_increase: 0
       stable_memory_increase: 1
     scopes:
       roaring_seq_inserts_journal:
         calls: 1
         instructions: 15233297
+        heap_increase: 0
+        stable_memory_increase: 0
+  bench_roaring_set_toggle_journal:
+    total:
+      calls: 1
+      instructions: 2669703
+      heap_increase: 0
+      stable_memory_increase: 0
+    scopes:
+      roaring_set_toggle_journal:
+        calls: 1
+        instructions: 2668648
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_truncate_2048_to_1024:
