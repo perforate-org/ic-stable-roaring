@@ -122,6 +122,7 @@ pub(crate) struct MemoryReader<'a, M: Memory> {
 }
 
 impl<'a, M: Memory> MemoryReader<'a, M> {
+    #[inline]
     pub(crate) fn new(memory: &'a M, offset: u64, len: u64) -> Self {
         let end = offset
             .checked_add(len)
@@ -133,12 +134,14 @@ impl<'a, M: Memory> MemoryReader<'a, M> {
         }
     }
 
+    #[inline]
     pub(crate) fn is_exhausted(&self) -> bool {
         self.offset == self.end
     }
 }
 
 impl<M: Memory> Read for MemoryReader<'_, M> {
+    #[inline]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.offset >= self.end {
             return Ok(0);

@@ -122,25 +122,25 @@ benches:
   bench_roaring_reopen_after_large_snapshot_65536:
     total:
       calls: 1
-      instructions: 46274
+      instructions: 46188
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_reopen_large:
         calls: 1
-        instructions: 45192
+        instructions: 45106
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_reopen_after_preemptive_checkpoint:
     total:
       calls: 1
-      instructions: 172526
+      instructions: 172438
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_reopen_after_checkpoint:
         calls: 1
-        instructions: 171444
+        instructions: 171356
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_reopen_after_pure_journal_full:
