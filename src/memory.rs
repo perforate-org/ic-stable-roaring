@@ -155,6 +155,7 @@ impl<M: Memory> Read for MemoryReader<'_, M> {
     }
 }
 
+/// Sequential writer for a range whose final extent was pre-grown by the caller.
 pub(crate) struct MemoryWriter<'a, M: Memory> {
     memory: &'a M,
     offset: u64,
@@ -172,7 +173,6 @@ impl<M: Memory> Write for MemoryWriter<'_, M> {
             .offset
             .checked_add(buf.len() as u64)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "address overflow"))?;
-        grow_memory_to_at_least_bytes(self.memory, end).map_err(io::Error::other)?;
         self.memory.write(self.offset, buf);
         self.offset = end;
         Ok(buf.len())
