@@ -835,6 +835,59 @@ mod tests {
         }
     }
 
+    /// Test-only memory that records a deep copy after each production `Memory::write` call.
+    /// Recording is opt-in so construction and setup writes do not enter a checkpoint trace.
+    #[derive(Clone)]
+    struct RecordingMemory {
+        inner: VectorMemory,
+        recording: Rc<Cell<bool>>,
+        captures: Rc<RefCell<Vec<VectorMemory>>>,
+    }
+
+    impl RecordingMemory {
+        fn new() -> Self {
+            Self {
+                inner: VectorMemory::default(),
+                recording: Rc::new(Cell::new(false)),
+                captures: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+
+        fn start_recording(&self) {
+            self.captures.borrow_mut().clear();
+            self.recording.set(true);
+        }
+
+        fn stop_recording(&self) -> Vec<VectorMemory> {
+            self.recording.set(false);
+            core::mem::take(&mut *self.captures.borrow_mut())
+        }
+    }
+
+    impl Memory for RecordingMemory {
+        fn size(&self) -> u64 {
+            self.inner.size()
+        }
+
+        fn grow(&self, pages: u64) -> i64 {
+            self.inner.grow(pages)
+        }
+
+        fn read(&self, offset: u64, dst: &mut [u8]) {
+            self.inner.read(offset, dst);
+        }
+
+        fn write(&self, offset: u64, src: &[u8]) {
+            self.inner.write(offset, src);
+            if self.recording.get() {
+                let bytes = self.inner.borrow().clone();
+                self.captures
+                    .borrow_mut()
+                    .push(Rc::new(RefCell::new(bytes)));
+            }
+        }
+    }
+
     #[cfg(journal_slots_ge_1024)]
     fn fill_journal_for_checkpoint_failure(bs: &RoaringBitmap<FailOnGrowMemory>) -> u32 {
         const CONTAINER_STRIDE: u64 = 1 << 16;
@@ -1149,6 +1202,169 @@ mod tests {
         assert_eq!(bs.len(), (crate::JOURNAL_CAP_SLOTS + 1) as u64);
     }
 
+    #[derive(Debug)]
+    enum CheckpointObservation {
+        Rejected,
+        Accepted { len: u64, bitmap: RoaringHeap },
+    }
+
+    struct CheckpointTrace {
+        expected_len: u64,
+        expected_bitmap: RoaringHeap,
+        observations: Vec<CheckpointObservation>,
+    }
+
+    fn checkpoint_trace<F>(seed: RoaringHeap, seed_len: u64, mutate: F) -> CheckpointTrace
+    where
+        F: FnOnce(&RoaringBitmap<RecordingMemory>),
+    {
+        let memory = RecordingMemory::new();
+        drop(RoaringBitmap::new(memory.clone()).unwrap());
+        let mut snapshot = Vec::with_capacity(seed.serialized_size());
+        seed.serialize_into(&mut snapshot).unwrap();
+        safe_write(&memory, snapshot_base(), &snapshot).unwrap();
+        write_header(&memory, seed_len, snapshot.len() as u64).unwrap();
+
+        let bs = RoaringBitmap::init(memory.clone()).unwrap();
+        assert_eq!(bs.state.borrow().bitmap, seed, "bad checkpoint seed");
+        mutate(&bs);
+        assert!(bs.journal_len.get() > 0, "mutation was not journaled");
+
+        let expected_len = bs.len();
+        let expected_bitmap = bs.state.borrow().bitmap.clone();
+        memory.start_recording();
+        bs.checkpoint().unwrap();
+        let captures = memory.stop_recording();
+
+        // More than the five header fields plus journal clear proves the trace includes writes
+        // issued by the real streaming Roaring serializer.
+        assert!(
+            captures.len() > 6,
+            "checkpoint trace contained only {captures_len} writes",
+            captures_len = captures.len()
+        );
+
+        let observations = captures
+            .into_iter()
+            .map(|captured| match RoaringBitmap::init(captured) {
+                Ok(reopened) => CheckpointObservation::Accepted {
+                    len: reopened.len(),
+                    bitmap: reopened.state.borrow().bitmap.clone(),
+                },
+                Err(_) => CheckpointObservation::Rejected,
+            })
+            .collect();
+        CheckpointTrace {
+            expected_len,
+            expected_bitmap,
+            observations,
+        }
+    }
+
+    fn assert_checkpoint_boundaries<F>(
+        case: &str,
+        seed: RoaringHeap,
+        seed_len: u64,
+        mutate: F,
+    ) -> usize
+    where
+        F: FnOnce(&RoaringBitmap<RecordingMemory>),
+    {
+        let trace = checkpoint_trace(seed, seed_len, mutate);
+        let mut accepted = 0;
+        let mut rejected = 0;
+        for (boundary, observation) in trace.observations.into_iter().enumerate() {
+            match observation {
+                CheckpointObservation::Accepted { len, bitmap } => {
+                    accepted += 1;
+                    assert_eq!(
+                        len, trace.expected_len,
+                        "{case}: write boundary {boundary} recovered a third logical length"
+                    );
+                    assert_eq!(
+                        bitmap, trace.expected_bitmap,
+                        "{case}: write boundary {boundary} recovered a third bitmap"
+                    );
+                }
+                CheckpointObservation::Rejected => rejected += 1,
+            }
+        }
+        assert!(accepted > 0, "{case}: no recoverable boundary");
+        rejected
+    }
+
+    #[test]
+    fn checkpoint_container_transition_boundaries_recover_current_or_reject() {
+        let first = 1;
+        let second = (1 << 16) | 10;
+        let third = (2 << 16) | 100;
+        let array_seed = RoaringHeap::from_iter([first, second, third]);
+        let mut rejected = assert_checkpoint_boundaries(
+            "array-to-array",
+            array_seed,
+            u64::from(third) + 1,
+            |bs| {
+                bs.clear(first).unwrap();
+                bs.insert(first + 1).unwrap();
+                bs.clear(second).unwrap();
+                bs.insert(second + 1).unwrap();
+                bs.ensure_len(u64::from(third) + 1_000).unwrap();
+            },
+        );
+
+        let array_limit_seed = RoaringHeap::from_iter((0..8192).step_by(2));
+        rejected += assert_checkpoint_boundaries("array-to-bitmap", array_limit_seed, 8191, |bs| {
+            bs.insert(1).unwrap()
+        });
+
+        let bitmap_seed = RoaringHeap::from_iter(0..4097);
+        rejected += assert_checkpoint_boundaries("bitmap-to-array", bitmap_seed, 4097, |bs| {
+            bs.clear(4096).unwrap()
+        });
+
+        let mut run_seed = RoaringHeap::new();
+        run_seed.insert_range(0..10_000);
+        let mut run_probe = run_seed.clone();
+        assert!(
+            run_probe.remove_run_compression(),
+            "run seed was not run-compressed"
+        );
+        rejected += assert_checkpoint_boundaries("run-to-run", run_seed, 10_000, |bs| {
+            bs.clear(5_000).unwrap();
+            bs.insert(12_000).unwrap();
+        });
+
+        assert!(rejected > 0, "suite did not exercise a rejected boundary");
+    }
+
+    #[test]
+    fn checkpoint_cross_container_splice_recovers_third_state() {
+        let second_key = 1u32 << 16;
+        let seed = RoaringHeap::from_iter([1, 2, second_key | 10, second_key | 20]);
+        let trace = checkpoint_trace(seed, u64::from(second_key | 20) + 1, |bs| {
+            bs.clear(1).unwrap();
+            bs.insert(second_key | 30).unwrap();
+        });
+
+        let third_bitmap = RoaringHeap::from_iter([
+            second_key | 2,
+            second_key | 10,
+            second_key | 20,
+            second_key | 30,
+        ]);
+        assert_ne!(third_bitmap, trace.expected_bitmap);
+        let witness_boundary = trace.observations.iter().position(|observation| {
+            matches!(
+                observation,
+                CheckpointObservation::Accepted { len, bitmap }
+                    if *len == trace.expected_len && *bitmap == third_bitmap
+            )
+        });
+        // After both new container descriptions are written, the decoder ignores the still-old
+        // offset table and partitions the old payload using the new cardinalities.
+        assert_eq!(witness_boundary, Some(5));
+    }
+
     #[test]
     fn capacity_one_mutation_avoids_double_checkpoint() {
         if crate::JOURNAL_CAP_SLOTS != 1 {
@@ -1392,6 +1608,24 @@ mod tests {
         let bs = reopen(bs.into_memory());
         assert_eq!(bs.len(), len_before);
         assert!(!bs.contains(requested_index));
+
+        let memory = FailOnGrowMemory::new();
+        let bs = RoaringBitmap::new(memory.clone()).unwrap();
+        let requested_index = fill_journal_for_checkpoint_failure(&bs);
+        let existing_index = requested_index - (1u32 << 16);
+        let len_before = bs.len();
+        assert!(bs.contains(existing_index));
+        memory.fail_grows();
+        assert!(matches!(
+            bs.clear(existing_index),
+            Err(BitmapError::GrowFailed(_))
+        ));
+        memory.allow_grows();
+        assert_eq!(bs.len(), len_before);
+        assert!(bs.contains(existing_index));
+        let bs = reopen(bs.into_memory());
+        assert_eq!(bs.len(), len_before);
+        assert!(bs.contains(existing_index));
 
         let memory = FailOnGrowMemory::new();
         let bs = RoaringBitmap::new(memory.clone()).unwrap();
