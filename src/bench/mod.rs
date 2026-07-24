@@ -458,6 +458,11 @@ fn bench_roaring_reopen_journal_prefix_one() -> canbench_rs::BenchResult {
     })
 }
 
+#[bench(raw)]
+fn bench_roaring_reopen_empty() -> canbench_rs::BenchResult {
+    bench_reopen_case("roaring_reopen_empty", |_bitset| {})
+}
+
 /// Repeatedly fill the journal and checkpoint by streaming sequential inserts. Total journal bytes
 /// appended and checkpoint frequency both move with `JOURNAL_CAP_SLOTS`.
 #[bench(raw)]
