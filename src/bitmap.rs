@@ -52,6 +52,7 @@
 //! The header version describes this crate's layout, not the `roaring` crate version. Compatibility
 //! with the supported Roaring serialization format is covered by a checked-in historical fixture.
 
+use crate::journal::{JournalRecord, JournalTag};
 use crate::memory::{
     MemoryReader, MemoryWriter, grow_memory_to_at_least_bytes, read_bytes, read_u64, safe_write,
     write_5_bytes, write_u64, write_zero_bytes,
@@ -266,96 +267,6 @@ fn write_header<M: Memory>(
     snapshot_len_bytes: u64,
 ) -> Result<(), crate::GrowFailed> {
     Header::new(len_bits, snapshot_len_bytes).write(memory)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum JournalTag {
-    Empty = 0,
-    SetLen = 1,
-    SetBit = 2,
-}
-
-/// One journal record is **5 bytes** (40 bits, little-endian). Layout (LSB → MSB within the 40 bits):
-///
-/// | bits     | field        | meaning |
-/// |----------|--------------|---------|
-/// | 0..32    | `payload_lo` | `SetLen`: low 32 bits of `len_bits`. `SetBit`: bit index. |
-/// | 32       | `len_hi`     | `SetLen`: MSB of the 33-bit length. `SetBit`: must be 0. |
-/// | 33..37   | `reserved`   | must be 0 |
-/// | 37       | `value`      | `SetBit`: set vs clear |
-/// | 38..40   | `tag`        | 1 = SetLen, 2 = SetBit |
-///
-/// `SetLen` length: `len_bits = ((len_hi as u64) << 32) | (payload_lo as u64)` (33 contiguous bits).
-///
-/// Replay ends at the first record whose **five bytes are all zero** (unused tail).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct JournalRecord([u8; 5]);
-
-impl JournalRecord {
-    fn set_len(len: u64) -> Self {
-        debug_assert!(
-            len <= crate::JOURNAL_LEN_MAX,
-            "JournalRecord::set_len: len must be validated at API boundary"
-        );
-        let payload_lo = len as u32;
-        let len_hi = ((len >> 32) & 1) as u32;
-        Self::pack_fields(JournalTag::SetLen, false, payload_lo, len_hi)
-    }
-
-    fn set_bit(index: u32, value: bool) -> Self {
-        Self::pack_fields(JournalTag::SetBit, value, index, 0)
-    }
-
-    fn pack_fields(tag: JournalTag, value: bool, payload_lo: u32, len_hi: u32) -> Self {
-        let raw = (payload_lo as u64)
-            | (((len_hi & 1) as u64) << 32)
-            | (((value as u64) & 1) << 37)
-            | (((tag as u64) & 3) << 38);
-        Self::from_raw(raw)
-    }
-
-    fn from_raw(raw: u64) -> Self {
-        let raw = raw & crate::JOURNAL_RECORD_RAW_MASK;
-        let b = raw.to_le_bytes();
-        Self([b[0], b[1], b[2], b[3], b[4]])
-    }
-
-    fn raw(&self) -> u64 {
-        let mut w = [0u8; 8];
-        w[..5].copy_from_slice(&self.0);
-        u64::from_le_bytes(w) & crate::JOURNAL_RECORD_RAW_MASK
-    }
-
-    fn unpack(self) -> Result<(JournalTag, bool, u64), InitError> {
-        let raw = self.raw();
-        if raw == 0 {
-            return Ok((JournalTag::Empty, false, 0));
-        }
-        let reserved = (raw >> 33) & 0xF;
-        if reserved != 0 {
-            return Err(InitError::InvalidLayout);
-        }
-        let tag_bits = (raw >> 38) & 3;
-        let tag = match tag_bits {
-            1 => JournalTag::SetLen,
-            2 => JournalTag::SetBit,
-            _ => return Err(InitError::InvalidLayout),
-        };
-        let value = ((raw >> 37) & 1) != 0;
-        let len_hi = (raw >> 32) & 1;
-        let payload_lo = raw as u32;
-        let payload = match tag {
-            JournalTag::SetLen => (len_hi << 32) | (payload_lo as u64),
-            JournalTag::SetBit => {
-                if len_hi != 0 {
-                    return Err(InitError::InvalidLayout);
-                }
-                payload_lo as u64
-            }
-            JournalTag::Empty => unreachable!(),
-        };
-        Ok((tag, value, payload))
-    }
 }
 
 /// Stable roaring bitmap with a heap mirror and a durable journal.
@@ -825,7 +736,7 @@ impl<M: Memory> RoaringBitmap<M> {
 }
 
 fn apply_record(state: &mut HeapState, record: JournalRecord) -> Result<(), InitError> {
-    let (tag, value, payload) = record.unpack()?;
+    let (tag, value, payload) = record.unpack().map_err(|_| InitError::InvalidLayout)?;
     match tag {
         JournalTag::Empty => return Err(InitError::InvalidLayout),
         JournalTag::SetLen => {
