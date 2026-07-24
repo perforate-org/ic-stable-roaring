@@ -17,12 +17,23 @@ pub(crate) fn read_bytes<M: Memory>(m: &M, offset: u64, dst: &mut [u8]) {
     m.read(offset, dst);
 }
 
+#[cfg(test)]
 pub(crate) fn write_5_bytes<M: Memory>(
     memory: &M,
     offset: u64,
     bytes: &[u8; 5],
 ) -> Result<(), GrowFailed> {
     safe_write(memory, offset, bytes.as_slice())
+}
+
+/// Writes one journal record into a region that the caller has already proved allocated.
+///
+/// The bitmap allocates the complete fixed journal region during initialization and checks the
+/// slot index before calling this helper. Keeping the bounds check out of this hot path avoids a
+/// stable-memory size query and redundant growth arithmetic for every mutation.
+#[inline]
+pub(crate) fn write_5_bytes_preallocated<M: Memory>(memory: &M, offset: u64, bytes: &[u8; 5]) {
+    memory.write(offset, bytes);
 }
 
 pub(crate) fn safe_write<M: Memory>(

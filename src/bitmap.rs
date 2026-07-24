@@ -53,9 +53,11 @@
 //! with the supported Roaring serialization format is covered by a checked-in historical fixture.
 
 use crate::journal::{JournalRecord, JournalTag};
+#[cfg(test)]
+use crate::memory::write_5_bytes;
 use crate::memory::{
     MemoryReader, MemoryWriter, grow_memory_to_at_least_bytes, read_bytes, read_u64, safe_write,
-    write_5_bytes, write_u64, write_zero_bytes,
+    write_5_bytes_preallocated, write_u64, write_zero_bytes,
 };
 use core::cell::{Cell, Ref, RefCell};
 use core::fmt;
@@ -697,7 +699,7 @@ impl<M: Memory> RoaringBitmap<M> {
         }
         let idx = self.journal_len.get();
         let base = journal_offset() + idx * JOURNAL_RECORD_SIZE;
-        write_5_bytes(&self.memory, base, &record.0)?;
+        write_5_bytes_preallocated(&self.memory, base, &record.0);
         self.journal_len.set(idx + 1);
         Ok(())
     }
