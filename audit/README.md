@@ -8,8 +8,7 @@ The audit covers:
 - the 40-bit journal record format;
 - v1 header, snapshot, and journal recovery;
 - strict replay and malformed-record rejection;
-- checkpoint streaming, one-write metadata publication, partial-snapshot observations, and
-  final-state recovery.
+- checkpoint write ordering, partial-snapshot observations, and final-state recovery.
 
 The `roaring` serialization codec itself is trusted and remains outside the formalization. Its
 decoded result and exact consumed length form the snapshot boundary in `Audit/Bitmap.lean`.
@@ -90,6 +89,6 @@ Byte-level interruption semantics are intentionally deferred until they can refi
 `Memory` contract. A whole-write placeholder would incorrectly make allocation and chunked writes
 look atomic.
 
-Checkpoint publishes the header, reserved bytes, fixed journal region, and alignment padding in one
-bounded metadata write. Partial in-place snapshot serialization remains represented at the
-trusted-decoder boundary; see `REPORT.md` for the byte/codec reachability gap.
+For the audited default capacity, checkpoint journal clearing fits in one 32 KiB zeroing write.
+Partial in-place snapshot serialization remains represented at the trusted-decoder boundary; see
+`REPORT.md` for the byte/codec reachability gap.

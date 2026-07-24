@@ -67,10 +67,10 @@ byte array.
 
 ### `Audit/Checkpoint.lean`
 
-Successful growth, partial and complete snapshot observations, and the final metadata publication
-boundary are represented. Checkpoint now publishes the header, reserved bytes, fixed journal
-region, and alignment padding in one bounded write after streaming the snapshot. Completed
-checkpoint recovery is proved.
+Successful growth, partial and complete snapshot observations, ordered header publication, and
+journal clearing are represented. For the audited default capacity, the entire journal region is
+smaller than the 32 KiB zeroing buffer, so checkpoint journal clearing requires at most one durable
+write. Completed checkpoint recovery is proved.
 
 The Rust tests deep-copy memory after every actual `Memory::write` and classify each image through
 the real `init`. The original array-preserving, array/bitmap-threshold, and run-container cases
@@ -142,7 +142,7 @@ produces the same post-mutation state.
 ### High — Interrupted checkpoint can recover a third logical state
 
 `RoaringBitmap::checkpoint` overwrites the snapshot in place through multiple `MemoryWriter` calls
-before publishing the header and clearing the old journal in one metadata-prefix write. `Audit.SnapshotWrite` proves every such
+before publishing the header and clearing the old journal. `Audit.SnapshotWrite` proves every such
 boundary has new-prefix/old-suffix byte form. The Rust regression
 `checkpoint_cross_container_splice_recovers_third_state` supplies a reachable prefix for which the
 real `roaring 0.11.4` decoder accepts a third state.

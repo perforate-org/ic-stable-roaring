@@ -234,14 +234,6 @@ impl Header {
         }
     }
 
-    fn encode_prefix(&self, dst: &mut [u8]) {
-        dst[0..3].copy_from_slice(&self.magic);
-        dst[3] = self.version;
-        dst[4..12].copy_from_slice(&self.len_bits.to_le_bytes());
-        dst[12..20].copy_from_slice(&self.journal_slots.to_le_bytes());
-        dst[20..28].copy_from_slice(&self.snapshot_len_bytes.to_le_bytes());
-    }
-
     fn write<M: Memory>(&self, memory: &M) -> Result<(), crate::GrowFailed> {
         safe_write(memory, MAGIC_OFFSET, &self.magic)?;
         safe_write(memory, VERSION_OFFSET, &[self.version])?;
@@ -275,22 +267,6 @@ fn write_header<M: Memory>(
     snapshot_len_bytes: u64,
 ) -> Result<(), crate::GrowFailed> {
     Header::new(len_bits, snapshot_len_bytes).write(memory)
-}
-
-/// Publishes the header and fixed journal region in one bounded write.
-///
-/// The buffer includes the reserved header bytes and alignment padding so the complete metadata
-/// prefix is one durable publication boundary. Snapshot serialization remains streaming and is
-/// intentionally performed before this function is called.
-fn write_checkpoint_metadata<M: Memory>(
-    memory: &M,
-    len_bits: u64,
-    snapshot_len_bytes: u64,
-) -> Result<(), crate::GrowFailed> {
-    let metadata_len = usize::try_from(snapshot_base()).expect("metadata prefix exceeds usize");
-    let mut metadata = vec![0; metadata_len];
-    Header::new(len_bits, snapshot_len_bytes).encode_prefix(&mut metadata[..28]);
-    safe_write(memory, 0, &metadata)
 }
 
 /// Stable roaring bitmap with a heap mirror and a durable journal.
@@ -759,7 +735,12 @@ impl<M: Memory> RoaringBitmap<M> {
             st.bitmap.serialize_into(&mut writer)?;
         }
 
-        write_checkpoint_metadata(&self.memory, len_bits, snapshot_len_bytes)?;
+        write_header(&self.memory, len_bits, snapshot_len_bytes)?;
+        write_zero_bytes(
+            &self.memory,
+            journal_offset(),
+            self.journal_len.get() * JOURNAL_RECORD_SIZE,
+        )?;
         self.journal_len.set(0);
         Ok(())
     }
@@ -872,7 +853,6 @@ mod tests {
         inner: VectorMemory,
         recording: Rc<Cell<bool>>,
         captures: Rc<RefCell<Vec<VectorMemory>>>,
-        writes: Rc<RefCell<Vec<(u64, usize)>>>,
     }
 
     impl RecordingMemory {
@@ -881,23 +861,17 @@ mod tests {
                 inner: VectorMemory::default(),
                 recording: Rc::new(Cell::new(false)),
                 captures: Rc::new(RefCell::new(Vec::new())),
-                writes: Rc::new(RefCell::new(Vec::new())),
             }
         }
 
         fn start_recording(&self) {
             self.captures.borrow_mut().clear();
-            self.writes.borrow_mut().clear();
             self.recording.set(true);
         }
 
         fn stop_recording(&self) -> Vec<VectorMemory> {
             self.recording.set(false);
             core::mem::take(&mut *self.captures.borrow_mut())
-        }
-
-        fn write_spans(&self) -> Vec<(u64, usize)> {
-            self.writes.borrow().clone()
         }
     }
 
@@ -917,7 +891,6 @@ mod tests {
         fn write(&self, offset: u64, src: &[u8]) {
             self.inner.write(offset, src);
             if self.recording.get() {
-                self.writes.borrow_mut().push((offset, src.len()));
                 let bytes = self.inner.borrow().clone();
                 self.captures
                     .borrow_mut()
@@ -1273,20 +1246,13 @@ mod tests {
         memory.start_recording();
         bs.checkpoint().unwrap();
         let captures = memory.stop_recording();
-        let write_spans = memory.write_spans();
 
+        // More than the five header fields plus journal clear proves the trace includes writes
+        // issued by the real streaming Roaring serializer.
         assert!(
-            write_spans.len() >= 2,
-            "checkpoint did not stream a snapshot and metadata"
-        );
-        assert_eq!(
-            write_spans.last().copied(),
-            Some((0, snapshot_base() as usize)),
-            "checkpoint metadata was not published in one bounded write"
-        );
-        assert!(
-            captures.len() == write_spans.len(),
-            "checkpoint capture and write-span counts diverged"
+            captures.len() > 6,
+            "checkpoint trace contained only {captures_len} writes",
+            captures_len = captures.len()
         );
 
         let observations = captures

@@ -17,7 +17,7 @@ classifying the trusted decoder on those reachable splices remains open.
 
 Rust references:
 - `src/bitmap.rs` L800-L824: checkpoint order
-- `src/bitmap.rs`: checkpoint metadata prefix publication
+- `src/bitmap.rs` L236-L242: header field write order
 - `src/memory.rs` L61-L80: chunked journal zeroing
 -/
 
@@ -37,7 +37,11 @@ inductive Stage
   | grown
   | snapshotWriting (observed : Option Bitmap.DecodedSnapshot)
   | snapshotWritten
-  | metadataWritten
+  | magicWritten
+  | versionWritten
+  | lengthWritten
+  | capacityWritten
+  | snapshotLengthWritten
   | journalCleared
   deriving DecidableEq
 
@@ -85,15 +89,32 @@ def snapshotImage (before : Bitmap.DurableImage) (state : Abstract.LogicalBitmap
   snapshot := some (targetSnapshot state encodedLen)
 }
 
-/-- Header visible at each publication boundary. Checkpoint publishes the complete metadata prefix
-in one bounded write after snapshot serialization. -/
+/-- Header visible at each publication boundary. Keeping publication in one transition function
+avoids a chain of nearly identical whole-image updates. Mirrors `src/bitmap.rs` L236-L242. -/
 def headerAt (before : Bitmap.Header) (state : Abstract.LogicalBitmap)
     (encodedLen : Nat) : Stage → Bitmap.Header
   | .before | .grown | .snapshotWriting _ | .snapshotWritten => before
-  | .metadataWritten | .journalCleared => targetHeader state encodedLen
+  | .magicWritten => { before with magic := Bitmap.MAGIC }
+  | .versionWritten => {
+      before with magic := Bitmap.MAGIC, version := Bitmap.VERSION
+    }
+  | .lengthWritten => {
+      before with
+      magic := Bitmap.MAGIC
+      version := Bitmap.VERSION
+      len_bits := state.len_bits
+    }
+  | .capacityWritten => {
+      before with
+      magic := Bitmap.MAGIC
+      version := Bitmap.VERSION
+      len_bits := state.len_bits
+      journal_slots := Bitmap.JOURNAL_CAP_SLOTS
+    }
+  | .snapshotLengthWritten | .journalCleared => targetHeader state encodedLen
 
-/-- Durable image at one checkpoint boundary. Metadata publication is one bounded write; journal
-clearing is included in that same prefix. -/
+/-- Durable image at one checkpoint boundary. The header cases mirror the five separate writes in
+`Header::write`; journal clearing is one atomic write for the audited default capacity. -/
 def imageAt (before : Bitmap.DurableImage) (state : Abstract.LogicalBitmap)
     (encodedLen : Nat) (stage : Stage) : Bitmap.DurableImage :=
   match stage with
@@ -102,12 +123,15 @@ def imageAt (before : Bitmap.DurableImage) (state : Abstract.LogicalBitmap)
   | .snapshotWriting observed => {
       grownImage before encodedLen with snapshot := observed
     }
-  | .metadataWritten | .journalCleared => {
+  | .journalCleared => {
       snapshotImage before state encodedLen with
       header := headerAt before.header state encodedLen stage
       journal := clearActiveJournal before.journal
     }
-  | _ => snapshotImage before state encodedLen
+  | _ => {
+      snapshotImage before state encodedLen with
+      header := headerAt before.header state encodedLen stage
+    }
 
 /-- Final durable checkpoint image after the active journal has been cleared. Mirrors
 `src/bitmap.rs` L816-L823. -/
