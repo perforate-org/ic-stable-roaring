@@ -2,25 +2,25 @@ benches:
   bench_roaring_checkpoint_after_full_journal:
     total:
       calls: 1
-      instructions: 587482
+      instructions: 587111
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_checkpoint:
         calls: 1
-        instructions: 586386
+        instructions: 586056
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_checkpoint_fixed_snapshot_65536:
     total:
       calls: 1
-      instructions: 169364
+      instructions: 169313
       heap_increase: 0
       stable_memory_increase: 0
     scopes:
       roaring_checkpoint_fixed_snapshot_65536:
         calls: 1
-        instructions: 168175
+        instructions: 168161
         heap_increase: 0
         stable_memory_increase: 0
   bench_roaring_contains_1024:

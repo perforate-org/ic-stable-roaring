@@ -302,7 +302,7 @@ fn bench_roaring_checkpoint_after_full_journal() -> canbench_rs::BenchResult {
         bitset
             .insert(black_box(JOURNAL_CAP_FILL.saturating_sub(1) as u32))
             .expect("insert triggering checkpoint");
-        black_box(bitset.contains(black_box(JOURNAL_CAP_FILL.saturating_sub(1) as u32)));
+        black_box(bitset.len());
     })
 }
 
@@ -333,7 +333,7 @@ fn bench_roaring_checkpoint_fixed_snapshot_65536() -> canbench_rs::BenchResult {
         bitset
             .set(0, !bit_zero_is_set)
             .expect("set triggering checkpoint");
-        black_box(bitset.contains(black_box(0)));
+        black_box(bitset.len());
     })
 }
 
