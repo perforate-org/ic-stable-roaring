@@ -43,6 +43,7 @@ const REPLAY_THREE_QUARTERS: u64 = crate::JOURNAL_CAP_SLOTS as u64 * 3 / 4;
 
 /// Small fixed prefix unrelated to journal cap — baseline reopen cost dominated by decode/scan start.
 const JOURNAL_PREFIX_SMALL: u64 = 64;
+const JOURNAL_PREFIX_ONE: u64 = 1;
 
 /// How many roughly “full-journal equivalents” of sequential inserts to apply in sustained bench.
 const JOURNAL_SUSTAINED_CYCLES: u64 = 8;
@@ -444,6 +445,16 @@ fn bench_roaring_reopen_journal_prefix_small() -> canbench_rs::BenchResult {
         let reopened = StableRoaringBitmap::init(bitset.into_memory()).expect("reopen");
         let last = black_box((JOURNAL_PREFIX_SMALL.saturating_sub(1)) as u32);
         black_box((reopened.len(), reopened.contains(last)));
+    })
+}
+
+#[bench(raw)]
+fn bench_roaring_reopen_journal_prefix_one() -> canbench_rs::BenchResult {
+    if JOURNAL_CAP_FILL <= JOURNAL_PREFIX_ONE {
+        return canbench_rs::BenchResult::default();
+    }
+    bench_reopen_case("roaring_reopen_journal_prefix_one", |bitset| {
+        populate(bitset, JOURNAL_PREFIX_ONE);
     })
 }
 
