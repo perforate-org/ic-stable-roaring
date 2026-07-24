@@ -30,6 +30,7 @@ pub(crate) struct DecodeError;
 pub(crate) struct JournalRecord(pub(crate) [u8; 5]);
 
 impl JournalRecord {
+    #[inline]
     pub(crate) fn set_len(len: u64) -> Self {
         debug_assert!(
             len <= LEN_MAX,
@@ -40,10 +41,12 @@ impl JournalRecord {
         Self::pack_fields(JournalTag::SetLen, false, payload_lo, len_hi)
     }
 
+    #[inline]
     pub(crate) fn set_bit(index: u32, value: bool) -> Self {
         Self::pack_fields(JournalTag::SetBit, value, index, 0)
     }
 
+    #[inline]
     fn pack_fields(tag: JournalTag, value: bool, payload_lo: u32, len_hi: u32) -> Self {
         let raw = (payload_lo as u64)
             | (((len_hi & 1) as u64) << 32)
@@ -52,17 +55,20 @@ impl JournalRecord {
         Self::from_raw(raw)
     }
 
+    #[inline]
     fn from_raw(raw: u64) -> Self {
         let bytes = (raw & RECORD_RAW_MASK).to_le_bytes();
         Self([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]])
     }
 
+    #[inline]
     pub(crate) fn raw(self) -> u64 {
         u64::from_le_bytes([
             self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], 0, 0, 0,
         ])
     }
 
+    #[inline]
     pub(crate) fn unpack(self) -> Result<(JournalTag, bool, u64), DecodeError> {
         let raw = self.raw();
         if raw == 0 {

@@ -746,6 +746,7 @@ impl<M: Memory> RoaringBitmap<M> {
     }
 }
 
+#[inline]
 fn apply_record(state: &mut HeapState, record: JournalRecord) -> Result<(), InitError> {
     let (tag, value, payload) = record.unpack().map_err(|_| InitError::InvalidLayout)?;
     match tag {

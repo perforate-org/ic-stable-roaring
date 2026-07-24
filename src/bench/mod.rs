@@ -187,6 +187,23 @@ fn bench_roaring_contains_65536_32768() -> canbench_rs::BenchResult {
 }
 
 #[bench(raw)]
+fn bench_roaring_contains_view_65536_32768() -> canbench_rs::BenchResult {
+    wipe::wipe_stable_memory();
+    let bitset = make_bitset();
+    populate(&bitset, CONTAINS_BITMAP_BITS);
+    let queries = make_spread_queries(CONTAINS_QUERY_COUNT_LARGE, CONTAINS_BITMAP_BITS);
+    canbench_rs::bench_fn(|| {
+        let _p = canbench_rs::bench_scope("roaring_contains_view_large_32768");
+        let view = bitset.contains_view();
+        let mut acc = false;
+        for index in black_box(&queries) {
+            acc ^= view.contains(*index);
+        }
+        black_box(acc);
+    })
+}
+
+#[bench(raw)]
 fn bench_roaring_truncate_2048_to_1024() -> canbench_rs::BenchResult {
     wipe::wipe_stable_memory();
     let bitset = make_bitset();
