@@ -53,12 +53,12 @@
 //! with the supported Roaring serialization format is covered by a checked-in historical fixture.
 
 use crate::journal::{JournalRecord, JournalTag};
-#[cfg(test)]
-use crate::memory::write_5_bytes;
 use crate::memory::{
-    MemoryReader, MemoryWriter, grow_memory_to_at_least_bytes, read_bytes, read_u64, safe_write,
+    MemoryReader, MemoryWriter, grow_memory_to_at_least_bytes, read_bytes, safe_write,
     write_5_bytes_preallocated, write_u64, write_zero_bytes,
 };
+#[cfg(test)]
+use crate::memory::{read_u64, write_5_bytes};
 use core::cell::{Cell, Ref, RefCell};
 use core::fmt;
 use ic_stable_structures::Memory;
@@ -226,16 +226,6 @@ impl Header {
         }
     }
 
-    fn read_fields<M: Memory>(memory: &M) -> Self {
-        Self {
-            magic: MAGIC,
-            version: VERSION,
-            len_bits: read_u64(memory, LEN_OFFSET),
-            journal_slots: read_u64(memory, JOURNAL_SLOTS_METADATA_OFFSET),
-            snapshot_len_bytes: read_u64(memory, SNAPSHOT_LEN_OFFSET),
-        }
-    }
-
     fn write<M: Memory>(&self, memory: &M) -> Result<(), crate::GrowFailed> {
         safe_write(memory, MAGIC_OFFSET, &self.magic)?;
         safe_write(memory, VERSION_OFFSET, &[self.version])?;
@@ -247,20 +237,28 @@ impl Header {
 }
 
 fn read_header<M: Memory>(memory: &M) -> Result<Header, InitError> {
-    let mut magic = [0u8; 3];
-    let mut version = [0u8; 1];
-    memory.read(MAGIC_OFFSET, &mut magic);
-    memory.read(VERSION_OFFSET, &mut version);
+    let mut bytes = [0u8; 28];
+    memory.read(MAGIC_OFFSET, &mut bytes);
+    let magic: [u8; 3] = bytes[0..3].try_into().expect("header magic width");
+    let version = bytes[3];
     if magic != MAGIC {
         return Err(InitError::BadMagic {
             actual: magic,
             expected: MAGIC,
         });
     }
-    if version[0] != VERSION {
-        return Err(InitError::IncompatibleVersion(version[0]));
+    if version != VERSION {
+        return Err(InitError::IncompatibleVersion(version));
     }
-    Ok(Header::read_fields(memory))
+    Ok(Header {
+        magic,
+        version,
+        len_bits: u64::from_le_bytes(bytes[4..12].try_into().expect("header length width")),
+        journal_slots: u64::from_le_bytes(bytes[12..20].try_into().expect("header capacity width")),
+        snapshot_len_bytes: u64::from_le_bytes(
+            bytes[20..28].try_into().expect("header snapshot width"),
+        ),
+    })
 }
 
 fn write_header<M: Memory>(

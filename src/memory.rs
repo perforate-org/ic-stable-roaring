@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 pub(crate) const WASM_PAGE_SIZE: u64 = 65_536;
 const BULK_BYTES: usize = 32 * 1024;
 
+#[cfg(test)]
 pub(crate) fn read_u64<M: Memory>(m: &M, offset: u64) -> u64 {
     let mut buf = [0u8; 8];
     m.read(offset, &mut buf);
