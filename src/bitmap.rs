@@ -298,6 +298,17 @@ fn write_header<M: Memory>(
 /// A few methods call the overflow check even when no journal append occurs, so **rare Θ(S)**
 /// work can still run when opening a legacy full journal (see [`Self::set`]).
 ///
+/// # Failure atomicity
+///
+/// On ICP, mutation and checkpoint writes execute synchronously within one message execution. The
+/// platform commits heap and stable-memory changes only on success and rolls them back on a trap or
+/// panic; see [ICP Message Execution Property 5](https://docs.internetcomputer.org/references/message-execution-properties/).
+///
+/// Checkpoint serialization uses multiple [`Memory::write`] calls. This type therefore does not
+/// provide generic process-crash atomicity for a custom [`Memory`] whose individual writes persist
+/// across an interruption. Such an implementation must supply an equivalent rollback or
+/// transactional boundary.
+///
 /// # Concurrency
 ///
 /// Interior mutability backs the heap mirror; treat this type as **single-writer**. Do not alias
