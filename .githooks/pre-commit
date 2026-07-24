@@ -1,7 +1,11 @@
 #!/bin/sh
 set -eu
 
-export PATH="${HOME}/.cargo/bin:${HOME}/.elan/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
+if [ -n "${HOME:-}" ]; then
+    PATH="${HOME}/.cargo/bin:${HOME}/.elan/bin:${PATH}"
+fi
+PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+export PATH
 
 git diff --cached --check
 cargo +1.90.0 fmt --check

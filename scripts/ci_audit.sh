@@ -2,9 +2,13 @@
 set -eu
 
 # Git hooks may run with a minimal PATH (for example when invoked by an IDE or
-# an SSH session), so include the standard Rust and Lean tool locations.
-export PATH="${HOME}/.cargo/bin:${HOME}/.elan/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
-export TMPDIR="${TMPDIR:-/tmp}"
+# an SSH session), so include standard Rust, Lean, and Homebrew tool locations.
+if [ -n "${HOME:-}" ]; then
+    PATH="${HOME}/.cargo/bin:${HOME}/.elan/bin:${PATH}"
+fi
+PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+export PATH
+export TMPDIR="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
